@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.doc_samples import build_request_pack, get_sample
+from app.doc_samples import build_request_pack_pdf, get_sample
 from app.intake import evaluate, resolve_required_documents
 from app.models import Client, ClientIntake, Document, User
 from app.schemas.intake import (
@@ -160,10 +160,10 @@ async def download_request_pack(
         select(ClientIntake).where(ClientIntake.client_id == client_id)
     )
     docs = resolve_required_documents(intake)
-    filename, text = build_request_pack(client.name, docs)
+    filename, pdf_bytes = build_request_pack_pdf(client.name, docs)
     return Response(
-        content=text,
-        media_type="text/plain; charset=utf-8",
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

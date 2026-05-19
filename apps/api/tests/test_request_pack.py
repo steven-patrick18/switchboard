@@ -1,17 +1,20 @@
-"""One emailable document request pack per client — cover + checklist +
-each mandated doc's spec, tailored to the client's intake.
+"""One emailable, client-ready PDF document request pack — cover +
+checklist + each mandated doc's spec, tailored to the client's intake.
+Content is verified by extracting the PDF text with pdfplumber.
 """
 
+import io
 import uuid
 from types import SimpleNamespace
 
+import pdfplumber
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
-from app.doc_samples import build_request_pack
+from app.doc_samples import build_request_pack_pdf
 from app.intake import resolve_required_documents
 from app.main import app
 
@@ -32,21 +35,26 @@ _FULL = {
 }
 
 
-def test_pack_assembly_base_and_tailored():
-    fn, text = build_request_pack(
+def _pdf_text(data: bytes) -> str:
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        return "\n".join(p.extract_text() or "" for p in pdf.pages)
+
+
+def test_pdf_pack_assembly_base_and_tailored():
+    fn, data = build_request_pack_pdf(
         "Acme VoIP LLC", resolve_required_documents(None)
     )
-    assert fn == "acme-voip-llc-document-request.txt"
-    assert "DOCUMENT REQUEST PACK" in text
-    assert "Client: Acme VoIP LLC" in text
-    assert "CHECKLIST" in text
-    assert "Officer government-issued ID" in text and "(SCAN)" in text
-    assert "state_cpcn" not in text  # no states → not in base pack
+    assert fn == "acme-voip-llc-document-request.pdf"
+    assert data[:5] == b"%PDF-"
+    text = _pdf_text(data)
+    assert "Document Request" in text and "Acme VoIP LLC" in text
+    assert "Checklist" in text
+    assert "Officer government-issued ID" in text
+    assert "Notarized state CPCN packet" not in text  # no states in base
 
     tailored = SimpleNamespace(intends_international=True, target_states=["TX"])
-    _, t2 = build_request_pack(
-        "Acme", resolve_required_documents(tailored)
-    )
+    _, d2 = build_request_pack_pdf("Acme", resolve_required_documents(tailored))
+    t2 = _pdf_text(d2)
     assert "Notarized state CPCN packet" in t2
     assert "FCC Section 214 international support" in t2
 
@@ -75,7 +83,7 @@ async def http():
     await engine.dispose()
 
 
-async def test_request_pack_endpoint(http):
+async def test_request_pack_endpoint_pdf(http):
     c = http
     reg = await c.post(
         "/auth/register",
@@ -88,17 +96,18 @@ async def test_request_pack_endpoint(http):
 
     r = await c.get(f"/clients/{cid}/documents/request-pack", headers=h)
     assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
     assert "attachment" in r.headers["content-disposition"]
-    assert "Client: Acme VoIP" in r.text
-    assert "CHECKLIST" in r.text
-    assert "Notarized state CPCN packet" not in r.text  # no intake yet
+    assert ".pdf" in r.headers["content-disposition"]
+    assert r.content[:5] == b"%PDF-"
+    text = _pdf_text(r.content)
+    assert "Acme VoIP" in text and "Checklist" in text
+    assert "Notarized state CPCN packet" not in text  # no intake yet
 
-    # Capture intake with target states → pack now includes the state pack.
     await c.put(f"/clients/{cid}/intake", headers=h, json=_FULL)
     r = await c.get(f"/clients/{cid}/documents/request-pack", headers=h)
-    assert "Notarized state CPCN packet" in r.text
+    assert "Notarized state CPCN packet" in _pdf_text(r.content)
 
-    # Operator-scoped.
     reg2 = await c.post(
         "/auth/register",
         json={"email": "b@acme.com", "password": "supersecret", "name": "B"},

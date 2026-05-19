@@ -103,38 +103,94 @@ def _slug(name: str) -> str:
     return out.strip("-") or "client"
 
 
-def build_request_pack(client_name: str, docs) -> tuple[str, str]:
-    """One emailable packet for a client: cover note, a checklist (with
-    * for mandatory and (SCAN) where a scan is required), then each
+def _xml(text: str) -> str:
+    """Escape for ReportLab Paragraph markup; preserve line breaks."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", "<br/>")
+    )
+
+
+def build_request_pack_pdf(client_name: str, docs) -> tuple[str, bytes]:
+    """One emailable, client-ready PDF: cover note, a checklist (with *
+    for mandatory and (SCAN) where a scan is required), then each
     document's spec. `docs` is the client's resolved required documents
     so the pack is tailored (international / target states included)."""
-    lines: list[str] = [
-        "SWITCHBOARD — DOCUMENT REQUEST PACK",
-        f"Client: {client_name}",
-        "=" * 60,
-        "",
-        "Please provide every document below. Items marked * are "
-        "mandatory. Items marked (SCAN) must be a clear scanned copy of "
-        "the physical / notarized original. Incorrect or missing "
-        "documents delay the launch — ask before sending if unsure.",
-        "",
-        "CHECKLIST",
+    from io import BytesIO
+
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+    )
+
+    styles = getSampleStyleSheet()
+    mono = ParagraphStyle(
+        "Mono",
+        parent=styles["Code"],
+        fontSize=8.5,
+        leading=11,
+        alignment=TA_LEFT,
+    )
+    body = ParagraphStyle(
+        "Body", parent=styles["Normal"], fontSize=10.5, leading=15
+    )
+    docname = ParagraphStyle(
+        "DocName",
+        parent=styles["Heading2"],
+        spaceBefore=16,
+        textColor="#1e293b",
+    )
+
+    buf = BytesIO()
+    pdf = SimpleDocTemplate(
+        buf,
+        pagesize=letter,
+        title=f"Document Request — {client_name}",
+        leftMargin=0.9 * inch,
+        rightMargin=0.9 * inch,
+        topMargin=0.9 * inch,
+        bottomMargin=0.8 * inch,
+    )
+    story = [
+        Paragraph(f"Document Request — {_xml(client_name)}", styles["Title"]),
+        Paragraph(
+            "Switchboard · The AI Operator Platform", styles["Italic"]
+        ),
+        Spacer(1, 16),
+        Paragraph(
+            "Please provide every document below. Items marked "
+            "<b>*</b> are mandatory. Items marked <b>(SCAN)</b> must be a "
+            "clear scanned copy of the physical or notarized original. "
+            "Incorrect or missing documents delay the launch — ask before "
+            "sending if you are unsure.",
+            body,
+        ),
+        Spacer(1, 16),
+        Paragraph("Checklist", styles["Heading2"]),
     ]
     for d in docs:
-        star = " *" if d.mandatory else ""
-        scan = " (SCAN)" if d.needs_scan else ""
-        lines.append(f"  [ ] {d.label}{star}{scan}")
-    lines.append("")
-    lines.append("=" * 60)
+        star = " <b>*</b>" if d.mandatory else ""
+        scan = " <b>(SCAN)</b>" if d.needs_scan else ""
+        story.append(
+            Paragraph(f"&#9744; {_xml(d.label)}{star}{scan}", body)
+        )
+    story.append(Spacer(1, 10))
+
     for d in docs:
         flags = (" *" if d.mandatory else "") + (
             "  (SCAN REQUIRED)" if d.needs_scan else ""
         )
-        lines += [
-            "",
-            f"## {d.label}{flags}",
-            _BODY.get(d.key, "(specification pending)"),
-            "",
-            "-" * 60,
-        ]
-    return f"{_slug(client_name)}-document-request.txt", "\n".join(lines) + "\n"
+        story.append(Paragraph(_xml(d.label) + _xml(flags), docname))
+        story.append(
+            Paragraph(_xml(_BODY.get(d.key, "(specification pending)")), mono)
+        )
+
+    pdf.build(story)
+    return f"{_slug(client_name)}-document-request.pdf", buf.getvalue()

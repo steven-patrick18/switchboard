@@ -184,7 +184,7 @@ export default function ClientDetailPage() {
                 onClick={() =>
                   downloadFile(
                     `/clients/${id}/documents/request-pack`,
-                    `${meta?.name ?? "client"}-document-request.txt`,
+                    `${meta?.name ?? "client"}-document-request.pdf`,
                   ).catch((e) =>
                     setMsg(
                       e instanceof Error ? e.message : "Download failed",
