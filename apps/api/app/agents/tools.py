@@ -287,12 +287,18 @@ async def _check_intake_status(_args: dict, ctx: ToolContext) -> str:
     c = evaluate_intake(intake, doc_types)
     if c.complete:
         return "Client intake is COMPLETE — all required data and documents captured."
+    missing = []
+    for d in c.required_documents:
+        if not d.provided:
+            tag = " (needs scan)" if d.needs_scan else ""
+            missing.append(f"{d.key}{tag}")
     return (
         "Client intake is INCOMPLETE. Missing fields: "
         + (", ".join(c.missing_fields) or "none")
-        + ". Missing documents: "
-        + (", ".join(c.missing_documents) or "none")
-        + ". Blocked steps cannot start until these are captured."
+        + ". Missing mandated documents: "
+        + (", ".join(missing) or "none")
+        + ". Documents marked '(needs scan)' must be a scanned physical "
+        "copy. Blocked steps cannot start until these are captured."
     )
 
 

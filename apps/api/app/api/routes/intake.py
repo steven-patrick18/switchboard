@@ -15,6 +15,7 @@ from app.schemas.intake import (
     DocumentRegister,
     IntakeStatus,
     IntakeUpsert,
+    RequiredDocOut,
 )
 
 router = APIRouter(prefix="/clients/{client_id}", tags=["intake"])
@@ -47,6 +48,9 @@ async def _status(client_id: uuid.UUID, db: AsyncSession) -> IntakeStatus:
             complete=c.complete,
             missing_fields=c.missing_fields,
             missing_documents=c.missing_documents,
+            required_documents=[
+                RequiredDocOut.model_validate(d) for d in c.required_documents
+            ],
         ),
     )
 

@@ -26,10 +26,21 @@ class IntakeUpsert(BaseModel):
     extra: dict | None = None
 
 
+class RequiredDocOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    label: str
+    mandatory: bool
+    needs_scan: bool
+    provided: bool
+
+
 class CompletenessOut(BaseModel):
     complete: bool
     missing_fields: list[str]
     missing_documents: list[str]
+    required_documents: list[RequiredDocOut]
 
 
 class IntakeOut(BaseModel):

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
-from app.intake import REQUIRED_DOCUMENT_TYPES
+from app.intake import mandatory_document_keys
 from app.main import app  # importing app.main registers all model metadata
 
 
@@ -58,8 +58,9 @@ async def test_capture_once_mandate(client: AsyncClient):
     assert body["intake"] is None
     assert body["completeness"]["complete"] is False
     assert "legal_name" in body["completeness"]["missing_fields"]
+    # No intake yet → the base mandated set is decided.
     assert set(body["completeness"]["missing_documents"]) == set(
-        REQUIRED_DOCUMENT_TYPES
+        mandatory_document_keys(None)
     )
 
     # Submitting an incomplete intake is blocked (the mandate).
@@ -88,16 +89,27 @@ async def test_capture_once_mandate(client: AsyncClient):
         },
     )
     assert r.status_code == 200
-    assert r.json()["completeness"]["missing_fields"] == []
+    comp = r.json()["completeness"]
+    assert comp["missing_fields"] == []
     # Docs still outstanding → still not complete, submit still blocked.
-    assert r.json()["completeness"]["complete"] is False
+    assert comp["complete"] is False
+
+    # The mandated set is decided per client: target_states pulled in the
+    # notarized state CPCN packet, which is flagged as needing a scan.
+    req = {d["key"]: d for d in comp["required_documents"]}
+    assert "state_cpcn_notarized" in req
+    assert req["state_cpcn_notarized"]["needs_scan"] is True
+    assert req["officer_government_id"]["needs_scan"] is True
+    assert req["ein_letter"]["needs_scan"] is False
+    assert all(d["mandatory"] for d in comp["required_documents"])
+
     r = await client.post(f"/clients/{cid}/intake/submit", headers=h)
     assert r.status_code == 409
 
-    # Register every mandated document.
-    for dt in REQUIRED_DOCUMENT_TYPES:
+    # Register exactly the documents the system decided are mandated.
+    for key in (d["key"] for d in comp["required_documents"]):
         r = await client.post(
-            f"/clients/{cid}/documents", headers=h, json={"type": dt}
+            f"/clients/{cid}/documents", headers=h, json={"type": key}
         )
         assert r.status_code == 201
 

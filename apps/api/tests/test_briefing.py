@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base, get_db
-from app.intake import REQUIRED_DOCUMENT_TYPES
 from app.main import app
 from app.models import AgentRun, Approval, Project, Task
 from app.models.approval import DECISION_PENDING, TIER_SIGN_PAY
@@ -72,10 +71,11 @@ async def test_briefing_aggregates_and_is_scoped(http):
         (await c.post("/clients", headers=h, json={"name": "Beta"})).json()["id"]
     )
 
-    # Client A: fully captured.
-    await c.put(f"/clients/{a}/intake", headers=h, json=_FULL_INTAKE)
-    for dt in REQUIRED_DOCUMENT_TYPES:
-        await c.post(f"/clients/{a}/documents", headers=h, json={"type": dt})
+    # Client A: fully captured — register exactly the docs the system
+    # decided are mandated for this client's intake.
+    st = (await c.put(f"/clients/{a}/intake", headers=h, json=_FULL_INTAKE)).json()
+    for d in st["completeness"]["required_documents"]:
+        await c.post(f"/clients/{a}/documents", headers=h, json={"type": d["key"]})
     # Client B: intake left empty (blocked).
 
     # Seed A: a task awaiting approval, a pending approval, an agent run.

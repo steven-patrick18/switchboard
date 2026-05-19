@@ -7,10 +7,18 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, getToken } from "@/lib/api";
 import Nav from "@/app/Nav";
 
+type RequiredDoc = {
+  key: string;
+  label: string;
+  mandatory: boolean;
+  needs_scan: boolean;
+  provided: boolean;
+};
 type Completeness = {
   complete: boolean;
   missing_fields: string[];
   missing_documents: string[];
+  required_documents: RequiredDoc[];
 };
 type IntakeStatus = {
   intake: Record<string, unknown> | null;
@@ -151,11 +159,49 @@ export default function ClientDetailPage() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Intake {c?.complete ? "✓ complete" : "— incomplete"}
         </h2>
-        {c && !c.complete && (
+        {c && !c.complete && c.missing_fields.length > 0 && (
           <p className="mt-2 text-sm text-amber-700">
-            Missing fields: {c.missing_fields.join(", ") || "none"}. Missing
-            docs: {c.missing_documents.join(", ") || "none"}.
+            Missing fields: {c.missing_fields.join(", ")}.
           </p>
+        )}
+        {c && (
+          <div className="mt-3">
+            <div className="text-xs uppercase tracking-wide text-slate-500">
+              Mandated documents (auto-decided for this client) — *required
+            </div>
+            <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+              {(c.required_documents ?? []).map((d) => (
+                <li
+                  key={d.key}
+                  className="flex items-center justify-between p-3 text-sm"
+                >
+                  <span>
+                    {d.label}
+                    {d.mandatory && (
+                      <span className="text-red-600" title="mandatory">
+                        {" "}
+                        *
+                      </span>
+                    )}
+                    {d.needs_scan && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
+                        scan
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={
+                      d.provided
+                        ? "text-xs font-semibold text-green-700"
+                        : "text-xs font-semibold text-slate-400"
+                    }
+                  >
+                    {d.provided ? "provided ✓" : "missing"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         <textarea
           className="mt-3 h-40 w-full rounded-md border border-slate-300 p-2 font-mono text-xs"
