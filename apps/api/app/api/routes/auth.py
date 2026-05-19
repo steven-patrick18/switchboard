@@ -3,9 +3,17 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.audit import record_audit
 from app.db import get_db
 from app.models import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UpdateProfileRequest,
+    UserOut,
+)
 from app.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -44,3 +52,43 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
 @router.get("/me", response_model=UserOut)
 async def me(current: User = Depends(get_current_user)) -> User:
     return current
+
+
+@router.put("/me", response_model=UserOut)
+async def update_profile(
+    body: UpdateProfileRequest,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    current.name = body.name
+    await db.commit()
+    await db.refresh(current)
+    return current
+
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    body: ChangePasswordRequest,
+    current: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    if not verify_password(body.current_password, current.hashed_password):
+        # Don't leak whether the user exists vs. the password is wrong.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must differ from the current password.",
+        )
+    current.hashed_password = hash_password(body.new_password)
+    # Audited so the security trail records the event (but not the secret).
+    await record_audit(
+        db,
+        actor=current.email,
+        action="account.password_changed",
+        subject=f"user:{current.id}",
+    )
+    await db.commit()

@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/workspaces", label: "Workspaces" },
   { href: "/approvals", label: "Approval queue" },
   { href: "/history", label: "History" },
+  { href: "/settings", label: "Settings" },
 ];
 
 type Me = { id: string; email: string; name: string };

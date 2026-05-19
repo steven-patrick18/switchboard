@@ -27,3 +27,12 @@ class UserOut(BaseModel):
     email: EmailStr
     name: str
     created_at: datetime
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class UpdateProfileRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
