@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.doc_samples import get_sample
-from app.intake import evaluate
+from app.doc_samples import build_request_pack, get_sample
+from app.intake import evaluate, resolve_required_documents
 from app.models import Client, ClientIntake, Document, User
 from app.schemas.intake import (
     CompletenessOut,
@@ -145,6 +145,27 @@ async def list_documents(
         .order_by(Document.created_at)
     )
     return list(result)
+
+
+@router.get("/documents/request-pack")
+async def download_request_pack(
+    client_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """One emailable packet of every mandated document's spec, tailored
+    to this client's intake (international / target states included)."""
+    client = await _owned_client(client_id, user, db)
+    intake = await db.scalar(
+        select(ClientIntake).where(ClientIntake.client_id == client_id)
+    )
+    docs = resolve_required_documents(intake)
+    filename, text = build_request_pack(client.name, docs)
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/documents/{doc_key}/sample")

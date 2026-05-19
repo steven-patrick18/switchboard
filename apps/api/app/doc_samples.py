@@ -94,3 +94,47 @@ def get_sample(key: str) -> tuple[str, str] | None:
 
 def all_sample_keys() -> list[str]:
     return [k for k in catalog_keys() if k in _BODY]
+
+
+def _slug(name: str) -> str:
+    out = "".join(ch.lower() if ch.isalnum() else "-" for ch in name)
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out.strip("-") or "client"
+
+
+def build_request_pack(client_name: str, docs) -> tuple[str, str]:
+    """One emailable packet for a client: cover note, a checklist (with
+    * for mandatory and (SCAN) where a scan is required), then each
+    document's spec. `docs` is the client's resolved required documents
+    so the pack is tailored (international / target states included)."""
+    lines: list[str] = [
+        "SWITCHBOARD — DOCUMENT REQUEST PACK",
+        f"Client: {client_name}",
+        "=" * 60,
+        "",
+        "Please provide every document below. Items marked * are "
+        "mandatory. Items marked (SCAN) must be a clear scanned copy of "
+        "the physical / notarized original. Incorrect or missing "
+        "documents delay the launch — ask before sending if unsure.",
+        "",
+        "CHECKLIST",
+    ]
+    for d in docs:
+        star = " *" if d.mandatory else ""
+        scan = " (SCAN)" if d.needs_scan else ""
+        lines.append(f"  [ ] {d.label}{star}{scan}")
+    lines.append("")
+    lines.append("=" * 60)
+    for d in docs:
+        flags = (" *" if d.mandatory else "") + (
+            "  (SCAN REQUIRED)" if d.needs_scan else ""
+        )
+        lines += [
+            "",
+            f"## {d.label}{flags}",
+            _BODY.get(d.key, "(specification pending)"),
+            "",
+            "-" * 60,
+        ]
+    return f"{_slug(client_name)}-document-request.txt", "\n".join(lines) + "\n"

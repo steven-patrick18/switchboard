@@ -176,8 +176,25 @@ export default function ClientDetailPage() {
         )}
         {c && (
           <div className="mt-3">
-            <div className="text-xs uppercase tracking-wide text-slate-500">
-              Mandated documents (auto-decided for this client) — *required
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase tracking-wide text-slate-500">
+                Mandated documents (auto-decided for this client) — *required
+              </div>
+              <button
+                onClick={() =>
+                  downloadFile(
+                    `/clients/${id}/documents/request-pack`,
+                    `${meta?.name ?? "client"}-document-request.txt`,
+                  ).catch((e) =>
+                    setMsg(
+                      e instanceof Error ? e.message : "Download failed",
+                    ),
+                  )
+                }
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+              >
+                Download request pack ↓
+              </button>
             </div>
             <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
               {(c.required_documents ?? []).map((d) => (
