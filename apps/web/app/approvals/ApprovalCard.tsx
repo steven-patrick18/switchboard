@@ -57,12 +57,11 @@ export default function ApprovalCard({
             a.action === approval.payload?.action,
         ) ?? null
       : null;
-  const [mode, setMode] = useState<"none" | "edit" | "reject">("none");
+  const [mode, setMode] = useState<"none" | "edit">("none");
   const [editText, setEditText] = useState(
     JSON.stringify(approval.payload ?? {}, null, 2),
   );
   const [note, setNote] = useState("");
-  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -79,6 +78,10 @@ export default function ApprovalCard({
     }
   }
 
+  function approve() {
+    call(`/approvals/${approval.id}/approve`, { note: note || null });
+  }
+
   function saveEdit() {
     let parsed: unknown;
     try {
@@ -91,6 +94,14 @@ export default function ApprovalCard({
       payload_override: parsed,
       note: note || null,
     });
+  }
+
+  function reject() {
+    if (!note.trim()) {
+      setErr("A reason is required to reject — explain why for the audit trail.");
+      return;
+    }
+    call(`/approvals/${approval.id}/reject`, { reason: note });
   }
 
   return (
@@ -126,38 +137,28 @@ export default function ApprovalCard({
           </pre>
 
           {mode === "edit" && (
-            <div className="mt-3 space-y-2">
-              <textarea
-                className="h-40 w-full rounded-md border border-slate-300 p-2 font-mono text-xs"
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-              />
-              <input
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                placeholder="Note (optional)"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
-            </div>
-          )}
-
-          {mode === "reject" && (
-            <input
-              className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              placeholder="Reason for rejection"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
+            <textarea
+              className="mt-3 h-40 w-full rounded-md border border-slate-300 p-2 font-mono text-xs"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
             />
           )}
+
+          <input
+            className="mt-3 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            placeholder="Note (optional for approve / edit; required for reject)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
 
           {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
 
           <div className="mt-3 flex flex-wrap gap-2">
-            {mode === "none" && (
+            {mode === "none" ? (
               <>
                 <button
                   disabled={busy}
-                  onClick={() => call(`/approvals/${approval.id}/approve`, {})}
+                  onClick={approve}
                   className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
                 >
                   Approve
@@ -171,14 +172,13 @@ export default function ApprovalCard({
                 </button>
                 <button
                   disabled={busy}
-                  onClick={() => setMode("reject")}
-                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700"
+                  onClick={reject}
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
                 >
                   Reject
                 </button>
               </>
-            )}
-            {mode === "edit" && (
+            ) : (
               <>
                 <button
                   disabled={busy}
@@ -192,29 +192,7 @@ export default function ApprovalCard({
                   onClick={() => setMode("none")}
                   className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
                 >
-                  Cancel
-                </button>
-              </>
-            )}
-            {mode === "reject" && (
-              <>
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    call(`/approvals/${approval.id}/reject`, {
-                      reason: reason || null,
-                    })
-                  }
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  Confirm reject
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={() => setMode("none")}
-                  className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-                >
-                  Cancel
+                  Cancel edit
                 </button>
               </>
             )}

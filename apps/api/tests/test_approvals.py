@@ -133,4 +133,47 @@ async def test_approval_queue(ctx):
     hb = {"Authorization": f"Bearer {reg2.json()['access_token']}"}
     assert (await c.get("/approvals?decision=all", headers=hb)).json() == []
     assert (await c.get(f"/approvals/{b1}", headers=hb)).status_code == 404
-    assert (await c.post(f"/approvals/{b1}/reject", headers=hb, json={})).status_code == 404
+    assert (
+        await c.post(
+            f"/approvals/{b1}/reject", headers=hb, json={"reason": "denied"}
+        )
+    ).status_code == 404
+
+
+async def test_reject_requires_reason_for_audit_trail(ctx):
+    """Every rejection must carry a reason so the audit log answers
+    'why did this NOT happen' as well as 'why did this happen'."""
+    c, maker = ctx
+    reg = await c.post(
+        "/auth/register",
+        json={"email": "op@example.com", "password": "supersecret", "name": "Op"},
+    )
+    h = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    cid = uuid.UUID(
+        (await c.post("/clients", headers=h, json={"name": "Acme"})).json()["id"]
+    )
+    a = await _seed_approval(maker, cid)
+
+    # Single reject without a reason → 422 (schema).
+    r = await c.post(f"/approvals/{a}/reject", headers=h, json={})
+    assert r.status_code == 422
+    r = await c.post(f"/approvals/{a}/reject", headers=h, json={"reason": "  "})
+    # Whitespace-only is still empty for min_length, so also 422.
+    assert r.status_code == 422
+    # Approval untouched.
+    assert (await c.get(f"/approvals/{a}", headers=h)).json()["decision"] == "pending"
+
+    # Batch reject without a note → also rejected (validator).
+    r = await c.post(
+        "/approvals/batch",
+        headers=h,
+        json={"ids": [str(a)], "decision": "rejected"},
+    )
+    assert r.status_code == 422
+
+    # With a reason: succeeds and the note lands on the approval row.
+    r = await c.post(
+        f"/approvals/{a}/reject", headers=h, json={"reason": "policy violation"}
+    )
+    assert r.status_code == 200
+    assert r.json()["note"] == "policy violation"

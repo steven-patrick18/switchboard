@@ -13,6 +13,7 @@ export default function ApprovalsPage() {
   const [items, setItems] = useState<Approval[]>([]);
   const [catalog, setCatalog] = useState<PortalActionSpec[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchNote, setBatchNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,11 +46,21 @@ export default function ApprovalsPage() {
   }
 
   async function batch(decision: "approved" | "rejected") {
+    if (decision === "rejected" && !batchNote.trim()) {
+      setError("A note is required when rejecting a batch — explain why for the audit trail.");
+      return;
+    }
     try {
+      setError(null);
       await apiFetch("/approvals/batch", {
         method: "POST",
-        body: JSON.stringify({ ids: [...selected], decision }),
+        body: JSON.stringify({
+          ids: [...selected],
+          decision,
+          note: batchNote || null,
+        }),
       });
+      setBatchNote("");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Batch failed");
@@ -66,8 +77,14 @@ export default function ApprovalsPage() {
       </div>
 
       {selected.size > 0 && (
-        <div className="sticky top-0 z-10 mt-4 flex items-center gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="sticky top-0 z-10 mt-4 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
           <span className="text-sm font-medium">{selected.size} selected</span>
+          <input
+            className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Batch note (optional for approve; required for reject)"
+            value={batchNote}
+            onChange={(e) => setBatchNote(e.target.value)}
+          />
           <button
             onClick={() => batch("approved")}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ApprovalOut(BaseModel):
@@ -30,13 +30,30 @@ class ApproveBody(BaseModel):
 
 
 class RejectBody(BaseModel):
-    reason: str | None = Field(default=None, max_length=2000)
+    # Required: every rejection carries a reason so the audit trail
+    # explains why. Whitespace-only is rejected by the validator below.
+    reason: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def _strip_nonempty(self) -> "RejectBody":
+        if not self.reason.strip():
+            raise ValueError("reason cannot be blank")
+        return self
 
 
 class BatchBody(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
     decision: Literal["approved", "rejected"]
     note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _reject_needs_note(self) -> "BatchBody":
+        if self.decision == "rejected" and not (self.note or "").strip():
+            raise ValueError(
+                "A note is required when rejecting a batch — explain why for "
+                "the audit trail."
+            )
+        return self
 
 
 class BatchResult(BaseModel):
