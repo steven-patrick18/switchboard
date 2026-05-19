@@ -79,6 +79,67 @@ _ENTRIES: tuple[ActionSpec, ...] = (
         label="Bank — check operating balance",
         description="Read-only check of the operating account balance (for carrier deposits).",
     ),
+    # --- Phase 2 catalog expansion ---
+    ActionSpec(
+        service="fcc_cores",
+        action="register_filer_id",
+        label="FCC CORES — register filer ID",
+        description="Initial FCC filer ID registration for the entity.",
+        required_params=("legal_name", "ein", "address"),
+    ),
+    ActionSpec(
+        service="fcc_cores",
+        action="submit_section_214",
+        label="FCC CORES — submit Section 214 international authority",
+        description="Apply for FCC Section 214 authorization to provide international service.",
+        required_params=("foreign_ownership", "countries"),
+        tier="T3",
+    ),
+    ActionSpec(
+        service="iconectiv",
+        action="check_osp_status",
+        label="iconectiv STI-PA — check OSP/OCN status",
+        description="Look up the client's OSP/OCN and STIR/SHAKEN attestation status.",
+        required_params=("osp_code",),
+    ),
+    ActionSpec(
+        service="iconectiv",
+        action="request_token_issuance",
+        label="iconectiv STI-PA — request token issuance",
+        description="Request a STIR/SHAKEN signing token (requires live officer vetting).",
+        required_params=("officer_name", "osp_code"),
+        tier="T3",
+    ),
+    ActionSpec(
+        service="irs",
+        action="submit_ein_application",
+        label="IRS — submit EIN application (SS-4)",
+        description="File Form SS-4 to obtain an EIN for the entity.",
+        required_params=("entity_type", "responsible_party_ssn"),
+        tier="T3",
+    ),
+    ActionSpec(
+        service="state_puc_ca",
+        action="file_cpcn",
+        label="California CPUC — file CPCN application",
+        description="Submit the California CPCN application packet.",
+        required_params=("service_areas",),
+        tier="T3",
+    ),
+    ActionSpec(
+        service="carrier_bandwidth",
+        action="submit_credit_app",
+        label="Bandwidth — submit credit application",
+        description="Submit the Bandwidth wholesale credit application package.",
+        required_params=("deposit_amount", "estimated_mou"),
+        tier="T3",
+    ),
+    ActionSpec(
+        service="carrier_inteliquent",
+        action="check_account_status",
+        label="Inteliquent — check wholesale account status",
+        description="Verify the Inteliquent wholesale account exists and is in good standing.",
+    ),
 )
 
 ACTIONS: dict[tuple[str, str], ActionSpec] = {

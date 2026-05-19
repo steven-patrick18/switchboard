@@ -28,14 +28,30 @@ from app.vault import store_credential
 
 def test_registry_has_seed_entries_and_distinct_services():
     entries = list_actions()
-    assert len(entries) >= 6
+    assert len(entries) >= 16
     keys = {(e.service, e.action) for e in entries}
+    # Original seed still there.
     assert ("fcc_cores", "submit_499_q") in keys
     assert ("irs", "check_ein_status") in keys
     assert ("state_puc_tx", "check_cpcn_status") in keys
+    # Expanded catalog covers each brief pillar.
+    assert ("fcc_cores", "submit_section_214") in keys
+    assert ("iconectiv", "request_token_issuance") in keys
+    assert ("irs", "submit_ein_application") in keys
+    assert ("state_puc_ca", "file_cpcn") in keys
+    assert ("carrier_bandwidth", "submit_credit_app") in keys
+    assert ("carrier_inteliquent", "check_account_status") in keys
     # Service list is distinct.
     s = services()
     assert len(s) == len(set(s))
+
+
+def test_expanded_entries_have_correct_tier_and_params():
+    spec = get_action("iconectiv", "request_token_issuance")
+    assert spec is not None and spec.tier == "T3"
+    assert set(spec.required_params) == {"officer_name", "osp_code"}
+    assert get_action("irs", "submit_ein_application").tier == "T3"
+    assert get_action("carrier_inteliquent", "check_account_status").tier == "T2"
 
 
 def test_get_action_and_missing_params():
