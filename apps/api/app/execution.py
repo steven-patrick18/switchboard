@@ -92,6 +92,28 @@ async def _execute_portal_action(
             f"'{service}'. Add it under Credentials vault and retry."
         )
 
+    # If an integration adapter is wired for this action, decrypt the
+    # credential (audited as `credential.accessed`) and invoke it. The
+    # secret stays in the closure; the result is structured + safe.
+    from app.integrations import get_handler
+    from app.vault import use_credential
+
+    handler = get_handler(service, action)
+    integration_text: str | None = None
+    if handler is not None:
+        secret = await use_credential(
+            db,
+            client_id=client_id,
+            service=service,
+            actor="system",
+            purpose=f"portal_action:{action}",
+        )
+        out = await handler(secret, payload.get("params") or {})
+        integration_text = (
+            f"Backend: {out.backend}. Status: {out.status}. "
+            f"Detail: {out.detail}."
+        )
+
     doc_type = f"portal_action:{service}:{action}"
     version = await _next_version(db, client_id, doc_type)
     doc = Document(client_id=client_id, type=doc_type, version=version)
@@ -100,11 +122,17 @@ async def _execute_portal_action(
     approval.result_document_id = doc.id
     label = spec.label if spec is not None else f"'{action}' on '{service}'"
     note = "" if spec is not None else " (action not in registry — free-form)"
+    base = (
+        f"Authenticated {label}{note} using the stored credential "
+        f"(vault id {cred.id}). Recorded in the Document Hub as "
+        f"{doc_type} (v{version})."
+    )
+    if integration_text is not None:
+        return base + " " + integration_text
     return (
-        f"Authenticated {label}{note} prepared using the stored credential "
-        f"(vault id {cred.id}). Recorded in the Document Hub as {doc_type} "
-        f"(v{version}). The external portal call itself is performed by "
-        f"the integration layer (Playwright/HTTP, not yet wired)."
+        base
+        + " The external portal call itself is performed by the "
+        "integration layer (Playwright/HTTP, not yet wired for this action)."
     )
 
 

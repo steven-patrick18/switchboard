@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Browser origins allowed to call the API (comma-separated).
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Portal-integration backend. 'demo' uses the in-process simulator
+    # (deterministic, no external I/O, safe for dev/CI). 'playwright' is
+    # the real-portal backend and is wired separately when ready.
+    portal_integration_backend: str = "demo"
+
     # Dedicated key for credential-vault encryption. Falls back to
     # app_secret_key if unset; back with a real KMS/Vault in production.
     credential_enc_key: str = ""
