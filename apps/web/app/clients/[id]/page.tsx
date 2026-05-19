@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { apiFetch, downloadFile, getToken } from "@/lib/api";
-import Nav from "@/app/Nav";
+import { apiFetch, downloadFile } from "@/lib/api";
+import AppShell from "@/app/AppShell";
 
 type RequiredDoc = {
   key: string;
@@ -51,7 +51,6 @@ type Audit = {
 const AGENTS = ["pm", "compliance", "document"];
 
 export default function ClientDetailPage() {
-  const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
   const [meta, setMeta] = useState<ClientMeta | null>(null);
@@ -95,12 +94,8 @@ export default function ClientDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace("/login");
-      return;
-    }
     load();
-  }, [load, router]);
+  }, [load]);
 
   async function act(fn: () => Promise<unknown>, ok: string) {
     setBusy(true);
@@ -160,22 +155,28 @@ export default function ClientDetailPage() {
   const c = intake?.completeness;
 
   return (
-    <main className="mx-auto max-w-3xl p-8">
-      <Nav />
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{meta?.name ?? "Client"}</h1>
-        <Link href="/approvals" className="text-sm text-slate-500 underline">
+    <AppShell>
+      <div className="flex items-baseline justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            {meta?.name ?? "Client"}
+          </h1>
+          {meta && (
+            <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
+              stage: {meta.stage}
+            </p>
+          )}
+        </div>
+        <Link
+          href="/approvals"
+          className="text-sm text-slate-600 hover:text-slate-900 hover:underline"
+        >
           Approval queue →
         </Link>
       </div>
-      {meta && (
-        <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
-          stage: {meta.stage}
-        </p>
-      )}
 
       {msg && (
-        <p className="mt-4 rounded-md bg-slate-100 p-3 text-sm text-slate-800">
+        <p className="mt-4 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-800 shadow-sm">
           {msg}
         </p>
       )}
@@ -215,7 +216,7 @@ export default function ClientDetailPage() {
                 Download request pack ↓
               </button>
             </div>
-            <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+            <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
               {(c.required_documents ?? []).map((d) => (
                 <li
                   key={d.key}
@@ -301,7 +302,7 @@ export default function ClientDetailPage() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Documents
         </h2>
-        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
           {docs.length === 0 && (
             <li className="p-3 text-sm text-slate-500">None yet.</li>
           )}
@@ -353,7 +354,7 @@ export default function ClientDetailPage() {
           file (audited) — they can never see the secret; the platform uses
           it on the client's behalf.
         </p>
-        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
           {creds.length === 0 && (
             <li className="p-3 text-sm text-slate-500">No credentials yet.</li>
           )}
@@ -501,7 +502,7 @@ export default function ClientDetailPage() {
             Run all queued
           </button>
         </div>
-        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
           {tasks.length === 0 && (
             <li className="p-3 text-sm text-slate-500">No tasks.</li>
           )}
@@ -548,7 +549,7 @@ export default function ClientDetailPage() {
         <p className="mt-1 text-xs text-slate-500">
           Immutable, append-only — every queued / decided / executed action.
         </p>
-        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
           {audit.length === 0 && (
             <li className="p-3 text-sm text-slate-500">No audit entries.</li>
           )}
@@ -565,6 +566,6 @@ export default function ClientDetailPage() {
           ))}
         </ul>
       </section>
-    </main>
+    </AppShell>
   );
 }

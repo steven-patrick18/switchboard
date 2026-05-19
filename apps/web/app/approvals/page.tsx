@@ -1,17 +1,15 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { apiFetch, getToken } from "@/lib/api";
-import Nav from "@/app/Nav";
+import { apiFetch } from "@/lib/api";
+import AppShell from "@/app/AppShell";
 import ApprovalCard, {
   type Approval,
   type PortalActionSpec,
 } from "./ApprovalCard";
 
 export default function ApprovalsPage() {
-  const router = useRouter();
   const [items, setItems] = useState<Approval[]>([]);
   const [catalog, setCatalog] = useState<PortalActionSpec[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -35,12 +33,8 @@ export default function ApprovalsPage() {
   }, []);
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace("/login");
-      return;
-    }
     load();
-  }, [load, router]);
+  }, [load]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -63,25 +57,26 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-8">
-      <Nav />
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Approval queue</h1>
+    <AppShell>
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-2xl font-semibold text-slate-900">
+          Approval queue
+        </h1>
         <span className="text-sm text-slate-500">{items.length} pending</span>
       </div>
 
       {selected.size > 0 && (
-        <div className="mt-4 flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <span className="text-sm">{selected.size} selected</span>
+        <div className="sticky top-0 z-10 mt-4 flex items-center gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
+          <span className="text-sm font-medium">{selected.size} selected</span>
           <button
             onClick={() => batch("approved")}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
           >
             Approve selected
           </button>
           <button
             onClick={() => batch("rejected")}
-            className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700"
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50"
           >
             Reject selected
           </button>
@@ -93,7 +88,7 @@ export default function ApprovalsPage() {
       <ul className="mt-6 space-y-3">
         {loading && <li className="text-sm text-slate-500">Loading...</li>}
         {!loading && items.length === 0 && (
-          <li className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+          <li className="rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
             Queue is clear. Nothing waiting on you.
           </li>
         )}
@@ -108,6 +103,6 @@ export default function ApprovalsPage() {
           />
         ))}
       </ul>
-    </main>
+    </AppShell>
   );
 }

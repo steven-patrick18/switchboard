@@ -1,10 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { apiFetch, getToken } from "@/lib/api";
-import Nav from "@/app/Nav";
+import { apiFetch } from "@/lib/api";
+import AppShell from "@/app/AppShell";
 import { type Approval, type PortalActionSpec } from "@/app/approvals/ApprovalCard";
 
 type ClientLite = { id: string; name: string };
@@ -28,7 +27,6 @@ const TIER_STYLE: Record<string, string> = {
 };
 
 export default function HistoryPage() {
-  const router = useRouter();
   const [items, setItems] = useState<Approval[]>([]);
   const [clients, setClients] = useState<ClientLite[]>([]);
   const [catalog, setCatalog] = useState<PortalActionSpec[]>([]);
@@ -54,10 +52,6 @@ export default function HistoryPage() {
   }, [decision, clientId, actionType]);
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace("/login");
-      return;
-    }
     (async () => {
       try {
         const [c, cat] = await Promise.all([
@@ -71,7 +65,7 @@ export default function HistoryPage() {
       }
     })();
     load();
-  }, [load, router]);
+  }, [load]);
 
   function specFor(a: Approval): PortalActionSpec | null {
     if (a.action_type !== "request_portal_action") return null;
@@ -84,10 +78,9 @@ export default function HistoryPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl p-8">
-      <Nav />
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">History</h1>
+    <AppShell>
+      <div className="flex items-baseline justify-between">
+        <h1 className="text-2xl font-semibold text-slate-900">History</h1>
         <span className="text-sm text-slate-500">{items.length} item(s)</span>
       </div>
 
@@ -188,6 +181,6 @@ export default function HistoryPage() {
           );
         })}
       </ul>
-    </main>
+    </AppShell>
   );
 }
