@@ -62,6 +62,15 @@ _BASE = (
 )
 
 
+def catalog_entry(key: str) -> tuple[str, bool] | None:
+    """(label, needs_scan) for a known document key, else None."""
+    return _CATALOG.get(key)
+
+
+def catalog_keys() -> list[str]:
+    return list(_CATALOG)
+
+
 def _doc(key: str) -> RequiredDoc:
     label, needs_scan = _CATALOG[key]
     return RequiredDoc(key=key, label=label, mandatory=True, needs_scan=needs_scan)

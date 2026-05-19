@@ -2,11 +2,13 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
+from app.doc_samples import get_sample
 from app.intake import evaluate
 from app.models import Client, ClientIntake, Document, User
 from app.schemas.intake import (
@@ -143,3 +145,27 @@ async def list_documents(
         .order_by(Document.created_at)
     )
     return list(result)
+
+
+@router.get("/documents/{doc_key}/sample")
+async def download_document_sample(
+    client_id: uuid.UUID,
+    doc_key: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Downloadable spec/template for a mandated document — the operator
+    forwards this to the client so they send the correct document."""
+    await _owned_client(client_id, user, db)
+    sample = get_sample(doc_key)
+    if sample is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No sample for document '{doc_key}'.",
+        )
+    filename, text = sample
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

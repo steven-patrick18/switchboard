@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { apiFetch, getToken } from "@/lib/api";
+import { apiFetch, downloadFile, getToken } from "@/lib/api";
 import Nav from "@/app/Nav";
 
 type RequiredDoc = {
@@ -199,14 +199,32 @@ export default function ClientDetailPage() {
                       </span>
                     )}
                   </span>
-                  <span
-                    className={
-                      d.provided
-                        ? "text-xs font-semibold text-green-700"
-                        : "text-xs font-semibold text-slate-400"
-                    }
-                  >
-                    {d.provided ? "provided ✓" : "missing"}
+                  <span className="flex items-center gap-3">
+                    <button
+                      onClick={() =>
+                        downloadFile(
+                          `/clients/${id}/documents/${d.key}/sample`,
+                          `${d.key}-requirements.txt`,
+                        ).catch((e) =>
+                          setMsg(
+                            e instanceof Error ? e.message : "Download failed",
+                          ),
+                        )
+                      }
+                      className="text-xs text-slate-500 underline"
+                      title="Download a spec to send the client"
+                    >
+                      sample ↓
+                    </button>
+                    <span
+                      className={
+                        d.provided
+                          ? "text-xs font-semibold text-green-700"
+                          : "text-xs font-semibold text-slate-400"
+                      }
+                    >
+                      {d.provided ? "provided ✓" : "missing"}
+                    </span>
                   </span>
                 </li>
               ))}
