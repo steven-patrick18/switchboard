@@ -16,11 +16,15 @@ Stack: Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.x (async) · Alembi
    .venv\Scripts\activate        # Windows
    pip install -e ".[dev]"
    ```
-3. Run the API:
+3. Apply database migrations:
+   ```
+   alembic upgrade head
+   ```
+4. Run the API:
    ```
    uvicorn app.main:app --reload
    ```
-4. Check it:
+5. Check it:
    - http://localhost:8000/health
    - http://localhost:8000/health/db  (verifies Postgres)
    - http://localhost:8000/docs       (OpenAPI)
