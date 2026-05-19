@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     agent_max_tokens: int = 16000
     agent_max_iterations: int = 12
 
+    # Browser origins allowed to call the API (comma-separated).
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # Auth
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
@@ -35,6 +38,10 @@ class Settings(BaseSettings):
         if self.database_url.startswith("postgresql://"):
             return self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return self.database_url
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache
