@@ -75,7 +75,12 @@ async def test_briefing_aggregates_and_is_scoped(http):
     # decided are mandated for this client's intake.
     st = (await c.put(f"/clients/{a}/intake", headers=h, json=_FULL_INTAKE)).json()
     for d in st["completeness"]["required_documents"]:
-        await c.post(f"/clients/{a}/documents", headers=h, json={"type": d["key"]})
+        await c.post(
+            f"/clients/{a}/documents",
+            headers=h,
+            data={"type": d["key"]},
+            files={"file": (f"{d['key']}.pdf", b"stub", "application/pdf")},
+        )
     # Client B: intake left empty (blocked).
 
     # Seed A: a task awaiting approval, a pending approval, an agent run.

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     # app_secret_key if unset; back with a real KMS/Vault in production.
     credential_enc_key: str = ""
 
+    # Content-addressed document storage root (local disk in dev/single-box;
+    # swap for S3 in prod by replacing app.storage). Path is resolved on
+    # first write so test fixtures can override it before any I/O.
+    documents_dir: str = ".documents"
+
     # Auth
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24

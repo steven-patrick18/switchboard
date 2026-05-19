@@ -3,19 +3,25 @@ at onboarding, and a client cannot be submitted until complete — so the
 client is never re-disturbed mid-process. Full HTTP flow, in-memory DB.
 """
 
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.db import Base, get_db
 from app.intake import mandatory_document_keys
 from app.main import app  # importing app.main registers all model metadata
 
 
 @pytest_asyncio.fixture
-async def client():
+async def client(tmp_path: Path):
+    # Isolate document storage per test so disk writes don't leak.
+    settings.documents_dir = str(tmp_path / "docs")
+
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         poolclass=StaticPool,
@@ -106,12 +112,18 @@ async def test_capture_once_mandate(client: AsyncClient):
     r = await client.post(f"/clients/{cid}/intake/submit", headers=h)
     assert r.status_code == 409
 
-    # Register exactly the documents the system decided are mandated.
+    # Upload exactly the documents the system decided are mandated.
     for key in (d["key"] for d in comp["required_documents"]):
         r = await client.post(
-            f"/clients/{cid}/documents", headers=h, json={"type": key}
+            f"/clients/{cid}/documents",
+            headers=h,
+            data={"type": key},
+            files={"file": (f"{key}.pdf", b"%PDF-1.4 stub", "application/pdf")},
         )
         assert r.status_code == 201
+        body = r.json()
+        assert body["filename"] == f"{key}.pdf"
+        assert body["size_bytes"] == len(b"%PDF-1.4 stub")
 
     r = await client.get(f"/clients/{cid}/intake", headers=h)
     assert r.json()["completeness"]["complete"] is True

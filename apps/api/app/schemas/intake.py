@@ -72,11 +72,6 @@ class IntakeStatus(BaseModel):
     completeness: CompletenessOut
 
 
-class DocumentRegister(BaseModel):
-    type: str = Field(min_length=1, max_length=64)
-    s3_key: str | None = Field(default=None, max_length=512)
-
-
 class DocumentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -84,4 +79,7 @@ class DocumentOut(BaseModel):
     type: str
     version: int
     s3_key: str | None
+    filename: str | None
+    mime: str | None
+    size_bytes: int | None
     created_at: datetime

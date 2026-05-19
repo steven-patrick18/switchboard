@@ -25,7 +25,16 @@ type IntakeStatus = {
   intake: Record<string, unknown> | null;
   completeness: Completeness;
 };
-type Doc = { id: string; type: string; version: number; created_at: string };
+type Doc = {
+  id: string;
+  type: string;
+  version: number;
+  s3_key: string | null;
+  filename: string | null;
+  mime: string | null;
+  size_bytes: number | null;
+  created_at: string;
+};
 type Cred = {
   id: string;
   service: string;
@@ -50,6 +59,12 @@ type Audit = {
 
 const AGENTS = ["pm", "compliance", "document"];
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
 
@@ -66,6 +81,7 @@ export default function ClientDetailPage() {
   });
   const [intakeText, setIntakeText] = useState("{}");
   const [docType, setDocType] = useState("");
+  const [docFile, setDocFile] = useState<File | null>(null);
   const [agent, setAgent] = useState("compliance");
   const [instruction, setInstruction] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -302,6 +318,11 @@ export default function ClientDetailPage() {
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Documents
         </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Upload the actual file (PDF, image, scan). Storage is
+          content-addressed — uploading the same bytes twice de-dupes on
+          disk, and re-uploading a type bumps its version.
+        </p>
         <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
           {docs.length === 0 && (
             <li className="p-3 text-sm text-slate-500">None yet.</li>
@@ -310,37 +331,89 @@ export default function ClientDetailPage() {
             <li
               key={d.id}
               id={`doc-${d.id}`}
-              className="flex justify-between p-3 text-sm target:bg-amber-50"
+              className="flex items-center justify-between p-3 text-sm target:bg-amber-50"
             >
-              <span>{d.type}</span>
-              <span className="text-slate-500">v{d.version}</span>
+              <span className="flex flex-col">
+                <span>
+                  <span className="font-medium">{d.type}</span>{" "}
+                  <span className="text-xs text-slate-500">v{d.version}</span>
+                </span>
+                {d.filename && (
+                  <span className="text-xs text-slate-500">
+                    {d.filename}
+                    {typeof d.size_bytes === "number" &&
+                      ` · ${formatBytes(d.size_bytes)}`}
+                  </span>
+                )}
+              </span>
+              {d.s3_key ? (
+                <button
+                  onClick={() =>
+                    downloadFile(
+                      `/clients/${id}/documents/${d.id}/download`,
+                      d.filename ?? `${d.type}-v${d.version}`,
+                    ).catch((e) =>
+                      setMsg(
+                        e instanceof Error ? e.message : "Download failed",
+                      ),
+                    )
+                  }
+                  className="text-xs text-slate-700 underline"
+                >
+                  download ↓
+                </button>
+              ) : (
+                <span className="text-xs italic text-slate-400">no file</span>
+              )}
             </li>
           ))}
         </ul>
-        <div className="mt-2 flex gap-2">
+        <form
+          className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!docType.trim() || !docFile) return;
+            const form = new FormData();
+            form.set("type", docType.trim());
+            form.set("file", docFile);
+            await act(
+              () =>
+                apiFetch(`/clients/${id}/documents`, {
+                  method: "POST",
+                  body: form,
+                }),
+              `Uploaded ${docFile.name}.`,
+            );
+            setDocType("");
+            setDocFile(null);
+            (document.getElementById(
+              "doc-upload-file",
+            ) as HTMLInputElement | null)?.value &&
+              ((document.getElementById(
+                "doc-upload-file",
+              ) as HTMLInputElement).value = "");
+          }}
+        >
           <input
-            className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
             placeholder="Document type (e.g. ein_letter)"
             value={docType}
             onChange={(e) => setDocType(e.target.value)}
           />
+          <input
+            id="doc-upload-file"
+            type="file"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            onChange={(e) => setDocFile(e.target.files?.[0] ?? null)}
+          />
           <button
-            disabled={busy || !docType.trim()}
-            onClick={() =>
-              act(
-                () =>
-                  apiFetch(`/clients/${id}/documents`, {
-                    method: "POST",
-                    body: JSON.stringify({ type: docType }),
-                  }),
-                "Document registered.",
-              ).then(() => setDocType(""))
-            }
+            type="submit"
+            disabled={busy || !docType.trim() || !docFile}
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           >
-            Add
+            Upload
           </button>
-        </div>
+        </form>
       </section>
 
       {/* Credentials vault */}

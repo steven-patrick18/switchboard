@@ -1,11 +1,12 @@
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import storage
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.doc_samples import build_request_pack_pdf, get_sample
@@ -14,7 +15,6 @@ from app.models import Client, ClientIntake, Document, User
 from app.schemas.intake import (
     CompletenessOut,
     DocumentOut,
-    DocumentRegister,
     IntakeStatus,
     IntakeUpsert,
     RequiredDocOut,
@@ -36,10 +36,16 @@ async def _status(client_id: uuid.UUID, db: AsyncSession) -> IntakeStatus:
     intake = await db.scalar(
         select(ClientIntake).where(ClientIntake.client_id == client_id)
     )
+    # Only documents that actually have bytes on disk count as "provided"
+    # toward intake completeness — registering a type without a file is a
+    # metadata stub, not satisfaction of a mandate.
     doc_types = set(
         (
             await db.scalars(
-                select(Document.type).where(Document.client_id == client_id)
+                select(Document.type).where(
+                    Document.client_id == client_id,
+                    Document.s3_key.is_not(None),
+                )
             )
         ).all()
     )
@@ -119,18 +125,85 @@ async def submit_intake(
 @router.post(
     "/documents", response_model=DocumentOut, status_code=status.HTTP_201_CREATED
 )
-async def register_document(
+async def upload_document(
     client_id: uuid.UUID,
-    body: DocumentRegister,
+    type: str = Form(min_length=1, max_length=64),
+    file: UploadFile = File(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Document:
+    """Upload the actual bytes for a document of `type`. Storage is
+    content-addressed (SHA-256), so re-uploading the same file is a
+    no-op on disk; a new Document row is still created so version
+    history shows the upload event."""
     await _owned_client(client_id, user, db)
-    doc = Document(client_id=client_id, type=body.type, s3_key=body.s3_key)
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty.",
+        )
+    try:
+        digest, size = storage.store_bytes(data)
+    except storage.TooLargeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(exc),
+        ) from exc
+    # New version = (max existing version for this type) + 1.
+    existing_max = await db.scalar(
+        select(Document.version)
+        .where(Document.client_id == client_id, Document.type == type)
+        .order_by(Document.version.desc())
+        .limit(1)
+    )
+    doc = Document(
+        client_id=client_id,
+        type=type,
+        version=(existing_max or 0) + 1,
+        s3_key=digest,
+        filename=file.filename,
+        mime=file.content_type,
+        size_bytes=size,
+    )
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
     return doc
+
+
+@router.get("/documents/{doc_id}/download")
+async def download_document(
+    client_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Stream back the uploaded bytes. Owner-scoped via _owned_client."""
+    await _owned_client(client_id, user, db)
+    doc = await db.get(Document, doc_id)
+    if doc is None or doc.client_id != client_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found."
+        )
+    if not doc.s3_key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document has no uploaded file.",
+        )
+    try:
+        data = storage.read_bytes(doc.s3_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document bytes missing from storage.",
+        ) from None
+    filename = doc.filename or f"{doc.type}-v{doc.version}"
+    return Response(
+        content=data,
+        media_type=doc.mime or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/documents", response_model=list[DocumentOut])
