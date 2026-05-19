@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
+from app.execution import execute_approval
 from app.models import Approval, Client, Project, Task, User
 from app.models.approval import (
     DECISION_APPROVED,
@@ -45,6 +46,8 @@ def _out(approval: Approval, client: Client) -> ApprovalOut:
         decision=approval.decision,
         reviewer_id=approval.reviewer_id,
         note=approval.note,
+        executed_at=approval.executed_at,
+        execution_result=approval.execution_result,
         ts=approval.ts,
     )
 
@@ -112,6 +115,8 @@ async def approve(
     approval.reviewer_id = user.id
     approval.note = body.note
     approval.ts = datetime.now(UTC)
+    approval.execution_result = await execute_approval(approval, client.id, db)
+    approval.executed_at = datetime.now(UTC)
     await db.commit()
     return _out(approval, client)
 
@@ -155,6 +160,11 @@ async def batch(
         approval.reviewer_id = user.id
         approval.note = body.note
         approval.ts = datetime.now(UTC)
+        if body.decision == DECISION_APPROVED:
+            approval.execution_result = await execute_approval(
+                approval, row[1].id, db
+            )
+            approval.executed_at = datetime.now(UTC)
         updated.append(aid)
     await db.commit()
     return BatchResult(updated=updated, skipped=skipped)

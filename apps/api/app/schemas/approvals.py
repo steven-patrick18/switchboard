@@ -16,6 +16,8 @@ class ApprovalOut(BaseModel):
     decision: str
     reviewer_id: uuid.UUID | None
     note: str | None
+    executed_at: datetime | None
+    execution_result: str | None
     ts: datetime
 
 

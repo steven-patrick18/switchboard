@@ -36,6 +36,13 @@ class Approval(Base):
     )
     # Reviewer's reason on reject, or note on edit&approve.
     note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Set when an approved action's in-platform follow-through has run.
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    execution_result: Mapped[str | None] = mapped_column(
+        String(2000), nullable=True
+    )
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
