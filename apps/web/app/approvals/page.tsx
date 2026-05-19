@@ -9,28 +9,50 @@ import ApprovalCard, {
   type PortalActionSpec,
 } from "./ApprovalCard";
 
+type ClientLite = { id: string; name: string };
+
 export default function ApprovalsPage() {
   const [items, setItems] = useState<Approval[]>([]);
   const [catalog, setCatalog] = useState<PortalActionSpec[]>([]);
+  const [clients, setClients] = useState<ClientLite[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchNote, setBatchNote] = useState("");
+  const [filterClient, setFilterClient] = useState("");
+  const [filterAction, setFilterAction] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [list, cat] = await Promise.all([
-        apiFetch<Approval[]>("/approvals"),
-        apiFetch<PortalActionSpec[]>("/portal-actions"),
-      ]);
+      const qs = new URLSearchParams();
+      if (filterClient) qs.set("client_id", filterClient);
+      if (filterAction.trim()) qs.set("action_type", filterAction.trim());
+      const url = qs.toString() ? `/approvals?${qs}` : "/approvals";
+      const list = await apiFetch<Approval[]>(url);
       setItems(list);
-      setCatalog(cat);
       setSelected(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
       setLoading(false);
     }
+  }, [filterClient, filterAction]);
+
+  // Sidebar data (clients + portal-action catalog) loads once; queue
+  // reloads whenever a filter changes.
+  useEffect(() => {
+    (async () => {
+      try {
+        const [cs, cat] = await Promise.all([
+          apiFetch<ClientLite[]>("/clients"),
+          apiFetch<PortalActionSpec[]>("/portal-actions"),
+        ]);
+        setClients(cs);
+        setCatalog(cat);
+      } catch {
+        // load() surfaces the primary error.
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -40,14 +62,17 @@ export default function ApprovalsPage() {
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
 
   async function batch(decision: "approved" | "rejected") {
     if (decision === "rejected" && !batchNote.trim()) {
-      setError("A note is required when rejecting a batch — explain why for the audit trail.");
+      setError(
+        "A note is required when rejecting a batch — explain why for the audit trail.",
+      );
       return;
     }
     try {
@@ -67,6 +92,8 @@ export default function ApprovalsPage() {
     }
   }
 
+  const hasFilters = filterClient !== "" || filterAction.trim() !== "";
+
   return (
     <AppShell>
       <div className="flex items-baseline justify-between">
@@ -74,6 +101,37 @@ export default function ApprovalsPage() {
           Approval queue
         </h1>
         <span className="text-sm text-slate-500">{items.length} pending</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+        <select
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          value={filterClient}
+          onChange={(e) => setFilterClient(e.target.value)}
+        >
+          <option value="">All clients</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <input
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          placeholder="action_type (optional)"
+          value={filterAction}
+          onChange={(e) => setFilterAction(e.target.value)}
+        />
+        <button
+          onClick={() => {
+            setFilterClient("");
+            setFilterAction("");
+          }}
+          disabled={!hasFilters}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+        >
+          Clear filters
+        </button>
       </div>
 
       {selected.size > 0 && (
@@ -106,7 +164,9 @@ export default function ApprovalsPage() {
         {loading && <li className="text-sm text-slate-500">Loading...</li>}
         {!loading && items.length === 0 && (
           <li className="rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
-            Queue is clear. Nothing waiting on you.
+            {hasFilters
+              ? "No pending approvals match those filters."
+              : "Queue is clear. Nothing waiting on you."}
           </li>
         )}
         {items.map((a) => (
