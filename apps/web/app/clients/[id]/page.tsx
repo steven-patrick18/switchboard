@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { apiFetch, downloadFile } from "@/lib/api";
+import { apiFetch, downloadFile, fetchBlob } from "@/lib/api";
 import AppShell from "@/app/AppShell";
 
 type RequiredDoc = {
@@ -65,6 +65,122 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function DocPreviewModal({
+  doc,
+  clientId,
+  onClose,
+}: {
+  doc: Doc;
+  clientId: string;
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    (async () => {
+      try {
+        const blob = await fetchBlob(
+          `/clients/${clientId}/documents/${doc.id}/download`,
+        );
+        if (!active) return;
+        const isText =
+          (doc.mime ?? "").startsWith("text/") ||
+          (doc.mime ?? "") === "application/json";
+        if (isText) {
+          setText(await blob.text());
+        } else {
+          objectUrl = URL.createObjectURL(blob);
+          setUrl(objectUrl);
+        }
+      } catch (err) {
+        if (active)
+          setError(err instanceof Error ? err.message : "Preview failed");
+      }
+    })();
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [doc.id, doc.mime, clientId]);
+
+  const mime = doc.mime ?? "";
+  const isImage = mime.startsWith("image/");
+  const isPdf = mime === "application/pdf";
+
+  return (
+    <div
+      className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-slate-900">
+              {doc.filename ?? `${doc.type}-v${doc.version}`}
+            </div>
+            <div className="text-xs text-slate-500">
+              {doc.type} · v{doc.version}
+              {typeof doc.size_bytes === "number" &&
+                ` · ${formatBytes(doc.size_bytes)}`}
+              {doc.mime && ` · ${doc.mime}`}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-md px-2 py-1 text-sm text-slate-600 hover:bg-slate-100"
+          >
+            close ✕
+          </button>
+        </div>
+        <div className="flex min-h-[400px] flex-1 items-center justify-center overflow-auto bg-slate-50 p-2">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {!error && !url && text === null && (
+            <p className="text-sm text-slate-500">Loading preview…</p>
+          )}
+          {url && isImage && (
+            <img src={url} alt={doc.filename ?? doc.type} className="max-h-[70vh]" />
+          )}
+          {url && isPdf && (
+            <iframe
+              src={url}
+              title={doc.filename ?? doc.type}
+              className="h-[70vh] w-full"
+            />
+          )}
+          {url && !isImage && !isPdf && (
+            <div className="p-6 text-center text-sm text-slate-600">
+              <p>Preview not available for this file type.</p>
+              <button
+                onClick={() =>
+                  downloadFile(
+                    `/clients/${clientId}/documents/${doc.id}/download`,
+                    doc.filename ?? `${doc.type}-v${doc.version}`,
+                  )
+                }
+                className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white"
+              >
+                Download
+              </button>
+            </div>
+          )}
+          {text !== null && (
+            <pre className="max-h-[70vh] w-full overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-white p-3 text-xs text-slate-800">
+              {text}
+            </pre>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
 
@@ -82,6 +198,7 @@ export default function ClientDetailPage() {
   const [intakeText, setIntakeText] = useState("{}");
   const [docType, setDocType] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
   const [agent, setAgent] = useState("compliance");
   const [instruction, setInstruction] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -400,29 +517,41 @@ export default function ClientDetailPage() {
                   <span className="text-xs text-slate-500">v{d.version}</span>
                 </span>
                 {d.filename && (
-                  <span className="text-xs text-slate-500">
+                  <button
+                    onClick={() => d.s3_key && setPreviewDoc(d)}
+                    disabled={!d.s3_key}
+                    className="text-left text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline disabled:no-underline disabled:hover:text-slate-500"
+                  >
                     {d.filename}
                     {typeof d.size_bytes === "number" &&
                       ` · ${formatBytes(d.size_bytes)}`}
-                  </span>
+                  </button>
                 )}
               </span>
               {d.s3_key ? (
-                <button
-                  onClick={() =>
-                    downloadFile(
-                      `/clients/${id}/documents/${d.id}/download`,
-                      d.filename ?? `${d.type}-v${d.version}`,
-                    ).catch((e) =>
-                      setMsg(
-                        e instanceof Error ? e.message : "Download failed",
-                      ),
-                    )
-                  }
-                  className="text-xs text-slate-700 underline"
-                >
-                  download ↓
-                </button>
+                <span className="flex items-center gap-3">
+                  <button
+                    onClick={() => setPreviewDoc(d)}
+                    className="text-xs text-slate-700 underline"
+                  >
+                    preview
+                  </button>
+                  <button
+                    onClick={() =>
+                      downloadFile(
+                        `/clients/${id}/documents/${d.id}/download`,
+                        d.filename ?? `${d.type}-v${d.version}`,
+                      ).catch((e) =>
+                        setMsg(
+                          e instanceof Error ? e.message : "Download failed",
+                        ),
+                      )
+                    }
+                    className="text-xs text-slate-700 underline"
+                  >
+                    download ↓
+                  </button>
+                </span>
               ) : (
                 <span className="text-xs italic text-slate-400">no file</span>
               )}
@@ -701,6 +830,14 @@ export default function ClientDetailPage() {
           ))}
         </ul>
       </section>
+
+      {previewDoc && (
+        <DocPreviewModal
+          doc={previewDoc}
+          clientId={id}
+          onClose={() => setPreviewDoc(null)}
+        />
+      )}
     </AppShell>
   );
 }

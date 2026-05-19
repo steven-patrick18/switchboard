@@ -15,10 +15,7 @@ export function clearToken(): void {
   window.localStorage.removeItem(TOKEN_KEY);
 }
 
-export async function downloadFile(
-  path: string,
-  filename: string,
-): Promise<void> {
+async function fetchAuthed(path: string): Promise<Response> {
   const headers = new Headers();
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -27,7 +24,19 @@ export async function downloadFile(
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail.detail ?? `Request failed (${res.status})`);
   }
-  const blob = await res.blob();
+  return res;
+}
+
+export async function fetchBlob(path: string): Promise<Blob> {
+  const res = await fetchAuthed(path);
+  return res.blob();
+}
+
+export async function downloadFile(
+  path: string,
+  filename: string,
+): Promise<void> {
+  const blob = await fetchBlob(path);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
