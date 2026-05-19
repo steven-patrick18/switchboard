@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     agent_effort: str = "high"
     agent_max_tokens: int = 16000
     agent_max_iterations: int = 12
+    # Hard cap on tasks run per bulk sweep — bounds API spend.
+    bulk_run_max: int = 10
 
     # Browser origins allowed to call the API (comma-separated).
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
