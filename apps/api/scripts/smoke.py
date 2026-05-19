@@ -60,10 +60,61 @@ async def main() -> None:
         )
         assert r.status_code == 201, r.text
         assert r.json()["stage"] == "intake"
+        cid = r.json()["id"]
         r = await c.get("/clients", headers=ha)
         assert r.status_code == 200 and len(r.json()) == 1, r.text
 
-        # Workspace isolation: operator B sees none of operator A's clients.
+        # Document upload: multipart with type + bytes; download round-trips.
+        r = await c.post(
+            f"/clients/{cid}/documents",
+            headers=ha,
+            data={"type": "ssn_card"},
+            files={"file": ("ssn.pdf", b"%PDF-1.4 smoke", "application/pdf")},
+        )
+        assert r.status_code == 201, r.text
+        doc = r.json()
+        assert doc["s3_key"] and doc["size_bytes"] > 0 and doc["filename"] == "ssn.pdf"
+        r = await c.get(f"/clients/{cid}/documents/{doc['id']}/download", headers=ha)
+        assert r.status_code == 200 and r.content == b"%PDF-1.4 smoke", r.text
+
+        # Sidebar badge endpoint: pending count is owner-scoped.
+        r = await c.get("/approvals/count", headers=ha)
+        assert r.status_code == 200 and r.json() == {"pending": 0}, r.text
+
+        # Audit CSV export (operator-wide and per-client) returns CSV bytes.
+        r = await c.get("/audit.csv", headers=ha)
+        assert r.status_code == 200 and r.headers["content-type"].startswith(
+            "text/csv"
+        ), r.text
+        assert r.text.splitlines()[0].startswith("ts,actor,action,subject"), r.text
+        r = await c.get(f"/clients/{cid}/audit.csv", headers=ha)
+        assert r.status_code == 200, r.text
+
+        # Change password: old credentials stop working, new ones work.
+        r = await c.post(
+            "/auth/change-password",
+            headers=ha,
+            json={
+                "current_password": "supersecret",
+                "new_password": "evenmoresecret",
+            },
+        )
+        assert r.status_code == 204, r.text
+        r = await c.post(
+            "/auth/login",
+            json={"email": "a@example.com", "password": "supersecret"},
+        )
+        assert r.status_code == 401, r.text
+        r = await c.post(
+            "/auth/login",
+            json={"email": "a@example.com", "password": "evenmoresecret"},
+        )
+        assert r.status_code == 200, r.text
+        tok_a = r.json()["access_token"]
+        ha = {"Authorization": f"Bearer {tok_a}"}
+
+        # Workspace isolation: operator B sees none of operator A's clients;
+        # /audit.csv is empty for them; the foreign client 404s.
         r = await c.post(
             "/auth/register",
             json={"email": "b@example.com", "password": "supersecret", "name": "Op B"},
@@ -72,6 +123,12 @@ async def main() -> None:
         hb = {"Authorization": f"Bearer {tok_b}"}
         r = await c.get("/clients", headers=hb)
         assert r.status_code == 200 and r.json() == [], r.text
+        r = await c.get("/audit.csv", headers=hb)
+        assert r.status_code == 200 and r.text.strip().splitlines() == [
+            "ts,actor,action,subject,client_id,before,after"
+        ], r.text
+        r = await c.get(f"/clients/{cid}/audit.csv", headers=hb)
+        assert r.status_code == 404, r.text
 
         r = await c.get("/clients")
         assert r.status_code in (401, 403), r.text

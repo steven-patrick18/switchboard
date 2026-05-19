@@ -34,11 +34,14 @@ Web (from `apps/web`): `npm install`; `npm run dev` (port 3000); type-check with
 ## Critical operational gotchas (non-obvious, discovered)
 
 - **`uvicorn --reload` does NOT reliably hot-reload in this environment.** After any backend change, **stop and restart the API process** or it serves stale code (routes will 404). The Next dev server *does* hot-reload.
-- **Migrations are not auto-applied on boot.** After adding a migration, run `alembic upgrade head` against every target DB, including the local `dev.db`.
+- **Migrations are not auto-applied on boot.** After adding a migration, run `alembic upgrade head` against every target DB, including the local `dev.db`. Latest revision: `0008` (document file fields).
 - **CORS**: browser calls need the request origin in `settings.cors_origin_list` (`app/config.py`, default `localhost:3000` / `127.0.0.1:3000`). A missing origin shows as "Failed to fetch" in the browser but passes curl/ASGI tests.
-- **Agents require `ANTHROPIC_API_KEY`** (repo-root `.env`; config reads `.env` and `../../.env`). Without it, agent-run endpoints return 503 by design (`get_anthropic_client` in `app/llm.py`). Auth, intake, approvals, audit, docs all work keyless.
+- **Agents require `ANTHROPIC_API_KEY`** (repo-root `.env`; config reads `.env` and `../../.env`). Without it, agent-run endpoints return 503 by design (`get_anthropic_client` in `app/llm.py`). Auth, intake, approvals, audit, document upload, settings, badge polling all work keyless.
 - Passwords use **bcrypt directly** with a SHA-256 prehash (`app/security.py`) — not passlib (passlib breaks on modern bcrypt). Pydantic `EmailStr` rejects reserved TLDs (`.test`, `.local`, `example.com`); use a real domain in tests/fixtures.
-- `*.db`, `.env`, `.venv/`, `node_modules/`, `.claude/` are gitignored.
+- **Document storage is content-addressed on local disk** under `settings.documents_dir` (default `.documents/`). The SHA-256 hex is stored as `Document.s3_key`; two identical uploads share one on-disk file. Swap `app/storage.py` for S3 in prod without touching the routers.
+- **`apiFetch` (web) auto-sets `Content-Type: application/json` unless the body is `FormData`** — required so the browser supplies the multipart boundary on document upload.
+- **Reject requires a non-blank reason at the schema level** (`RejectBody` / `BatchBody` validators). The audit trail must explain why something did NOT happen, not just why it did.
+- `*.db`, `.env`, `.venv/`, `node_modules/`, `.claude/`, `.documents/` are gitignored.
 
 ## Architecture — the big picture
 
@@ -49,9 +52,11 @@ The invariant: **agents propose, the operator approves, the platform executes, e
 3. **Execution on approval** — `app/execution.py::execute_approval`: approving/editing an `Approval` runs an executor keyed by `action_type` that performs the **in-platform** follow-through (materializes a versioned `Document`) and records the result. There is intentionally **no real external I/O** (FCC submission / Documenso e-sign are later integration layers; the recorded result says so). Wired in `app/api/routes/approvals.py` for single and batch.
 4. **Capture-once intake** — `app/intake.py` is the single source of truth. `resolve_required_documents(intake)` **auto-decides the mandated documents per client** from the intake (international → Section 214; target states → notarized state CPCN). Each doc carries `mandatory` (UI `*`) and `needs_scan`. Submit is blocked until complete. Agents read the same intake to avoid re-asking the client.
 5. **Document specs / request pack** — `app/doc_samples.py`: per-document client-facing specs and `build_request_pack_pdf()` (reportlab) — one tailored, client-ready PDF.
-6. **Audit trail** — `app/audit.py::record_audit` is append-only (no update/delete path = the legal record). Emitted across the approval lifecycle (queued by agent → approved/edited/rejected by operator → executed by system, incl. batch).
-7. **Briefing** — `app/api/routes/briefing.py`: deterministic (no LLM) operator-wide digest.
-8. **Web** — Next.js App Router, token in `localStorage`, `lib/api.ts` (`apiFetch`, `downloadFile`). All pages are token-gated client components: `/login`, `/dashboard` (briefing), `/workspaces`, `/clients/[id]`, `/approvals`.
+6. **Document upload + storage** — `app/storage.py` is content-addressed local disk (swap for S3 in prod). `POST /clients/{id}/documents` is multipart (form `type` + `file`); `GET /clients/{id}/documents/{doc_id}/download` streams the bytes back with the original filename + mime. The intake completeness check only counts a document type as provided once bytes are on file (`Document.s3_key IS NOT NULL`) — metadata stubs don't satisfy a mandate.
+7. **Audit trail** — `app/audit.py::record_audit` is append-only (no update/delete path = the legal record). Emitted across the approval lifecycle (queued by agent → approved/edited/rejected by operator → executed by system, incl. batch). CSV export at `GET /audit.csv` (operator-wide, owner-scoped) and `GET /clients/{id}/audit.csv` (per-client).
+8. **Briefing + sidebar badge** — `app/api/routes/briefing.py` is the deterministic (no LLM) operator-wide digest; `GET /approvals/count` is the light counter the sidebar polls every 30s to show pending approvals at a glance from any page.
+9. **Settings** — `PUT /auth/me` for display-name rename, `POST /auth/change-password` verifies current secret + audits the event (`account.password_changed`) without ever logging the secret.
+10. **Web** — Next.js App Router, token in `localStorage`, `lib/api.ts` (`apiFetch` w/ FormData passthrough, `downloadFile`, `fetchBlob`). All authenticated pages live inside `AppShell` (fixed left sidebar w/ pending-approval badge + operator profile, `max-w-7xl` content). Pages: `/login`, `/dashboard` (briefing + audit-export), `/workspaces`, `/clients/[id]` (intake wizard via `IntakeForm.tsx`, document upload with per-row "+ upload" / preview modal, credentials vault, agent runner, audit trail), `/approvals`, `/history`, `/settings`.
 
 ## Conventions
 
