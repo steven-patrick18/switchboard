@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.base import run_agent
 from app.agents.registry import AGENTS, get_agent
 from app.api.deps import get_current_user
-from app.config import settings
 from app.db import get_db
+from app.llm import get_anthropic_client
 from app.models import Client, Project, Task, User
 from app.models.project import PROJECT_STATUS_ACTIVE
 from app.schemas.agents import AgentRunRequest, AgentRunResponse
@@ -21,23 +21,13 @@ async def list_agents(_: User = Depends(get_current_user)) -> dict[str, list[str
     return {"agents": sorted(AGENTS)}
 
 
-def _anthropic_client():
-    if not settings.anthropic_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="ANTHROPIC_API_KEY is not configured.",
-        )
-    from anthropic import AsyncAnthropic
-
-    return AsyncAnthropic(api_key=settings.anthropic_api_key)
-
-
 @router.post("/{agent_name}/run", response_model=AgentRunResponse)
 async def run(
     agent_name: str,
     body: AgentRunRequest,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    anthropic=Depends(get_anthropic_client),
 ) -> AgentRunResponse:
     spec = get_agent(agent_name)
     if spec is None:
@@ -72,7 +62,7 @@ async def run(
 
     result = await run_agent(
         spec,
-        client=_anthropic_client(),
+        client=anthropic,
         db=db,
         task_id=task_id,
         instruction=body.instruction,
