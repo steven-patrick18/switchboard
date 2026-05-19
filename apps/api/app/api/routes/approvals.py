@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -75,6 +75,25 @@ def _require_pending(approval: Approval) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Approval already {approval.decision}",
         )
+
+
+@router.get("/count")
+async def pending_count(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """How many approvals are waiting on the operator right now. Light
+    endpoint so the sidebar badge can poll cheaply."""
+    n = await db.scalar(
+        select(func.count(Approval.id))
+        .join(Task, Task.id == Approval.task_id)
+        .join(Project, Project.id == Task.project_id)
+        .join(Client, Client.id == Project.client_id)
+        .where(
+            Client.owner_id == user.id, Approval.decision == DECISION_PENDING
+        )
+    )
+    return {"pending": int(n or 0)}
 
 
 @router.get("", response_model=list[ApprovalOut])

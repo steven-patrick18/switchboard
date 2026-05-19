@@ -21,6 +21,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [me, setMe] = useState<Me | null>(null);
   const [ready, setReady] = useState(false);
+  const [pending, setPending] = useState<number | null>(null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -38,6 +39,26 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       setReady(true);
     })();
   }, [router]);
+
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    async function tick() {
+      try {
+        const r = await apiFetch<{ pending: number }>("/approvals/count");
+        if (!cancelled) setPending(r.pending);
+      } catch {
+        // Soft-fail: silence transient network blips so the badge
+        // doesn't whip-saw on a fast page change.
+      }
+    }
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [ready, pathname]);
 
   if (!ready) {
     return (
@@ -65,18 +86,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <ul className="space-y-1">
             {LINKS.map((l) => {
               const active = pathname === l.href || pathname.startsWith(l.href + "/");
+              const showBadge =
+                l.href === "/approvals" && pending !== null && pending > 0;
               return (
                 <li key={l.href}>
                   <Link
                     href={l.href}
                     className={
-                      "block rounded-md px-3 py-2 text-sm transition " +
+                      "flex items-center justify-between rounded-md px-3 py-2 text-sm transition " +
                       (active
                         ? "bg-slate-800 text-white"
                         : "text-slate-300 hover:bg-slate-800 hover:text-white")
                     }
                   >
-                    {l.label}
+                    <span>{l.label}</span>
+                    {showBadge && (
+                      <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-slate-900">
+                        {pending}
+                      </span>
+                    )}
                   </Link>
                 </li>
               );
