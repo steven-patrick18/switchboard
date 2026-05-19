@@ -182,6 +182,168 @@ function DocPreviewModal({
   );
 }
 
+function DocRow({
+  doc,
+  clientId,
+  onPreview,
+  onMsg,
+  muted,
+}: {
+  doc: Doc;
+  clientId: string;
+  onPreview: (d: Doc) => void;
+  onMsg: (m: string) => void;
+  muted?: boolean;
+}) {
+  return (
+    <li
+      id={`doc-${doc.id}`}
+      className={
+        "flex items-center justify-between p-3 text-sm target:bg-amber-50 " +
+        (muted ? "bg-slate-50" : "")
+      }
+    >
+      <span className="flex flex-col">
+        <span>
+          <span className={muted ? "text-slate-600" : "font-medium"}>
+            {doc.type}
+          </span>{" "}
+          <span className="text-xs text-slate-500">v{doc.version}</span>
+        </span>
+        {doc.filename && (
+          <button
+            onClick={() => doc.s3_key && onPreview(doc)}
+            disabled={!doc.s3_key}
+            className="text-left text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline disabled:no-underline disabled:hover:text-slate-500"
+          >
+            {doc.filename}
+            {typeof doc.size_bytes === "number" &&
+              ` · ${formatBytes(doc.size_bytes)}`}
+          </button>
+        )}
+      </span>
+      {doc.s3_key ? (
+        <span className="flex items-center gap-3">
+          <button
+            onClick={() => onPreview(doc)}
+            className="text-xs text-slate-700 underline"
+          >
+            preview
+          </button>
+          <button
+            onClick={() =>
+              downloadFile(
+                `/clients/${clientId}/documents/${doc.id}/download`,
+                doc.filename ?? `${doc.type}-v${doc.version}`,
+              ).catch((e) =>
+                onMsg(e instanceof Error ? e.message : "Download failed"),
+              )
+            }
+            className="text-xs text-slate-700 underline"
+          >
+            download ↓
+          </button>
+        </span>
+      ) : (
+        <span className="text-xs italic text-slate-400">no file</span>
+      )}
+    </li>
+  );
+}
+
+function DocumentList({
+  docs,
+  clientId,
+  onPreview,
+  onMsg,
+}: {
+  docs: Doc[];
+  clientId: string;
+  onPreview: (d: Doc) => void;
+  onMsg: (m: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // Group by `type`; within each group sort version desc so the latest
+  // appears first. Group order = order of latest-version `created_at`
+  // (most recently touched group first).
+  const groups = new Map<string, Doc[]>();
+  for (const d of docs) {
+    const arr = groups.get(d.type) ?? [];
+    arr.push(d);
+    groups.set(d.type, arr);
+  }
+  const ordered = Array.from(groups.entries()).map(([type, list]) => {
+    list.sort((a, b) => b.version - a.version);
+    return [type, list] as const;
+  });
+  ordered.sort(([, a], [, b]) => {
+    const ta = new Date(a[0].created_at).getTime();
+    const tb = new Date(b[0].created_at).getTime();
+    return tb - ta;
+  });
+
+  if (docs.length === 0) {
+    return (
+      <ul className="mt-2 rounded-lg border border-slate-200 bg-white shadow-sm">
+        <li className="p-3 text-sm text-slate-500">None yet.</li>
+      </ul>
+    );
+  }
+
+  return (
+    <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
+      {ordered.map(([type, list]) => {
+        const [latest, ...older] = list;
+        const isOpen = expanded.has(type);
+        return (
+          <li key={type}>
+            <DocRow
+              doc={latest}
+              clientId={clientId}
+              onPreview={onPreview}
+              onMsg={onMsg}
+            />
+            {older.length > 0 && (
+              <>
+                <button
+                  onClick={() =>
+                    setExpanded((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(type)) next.delete(type);
+                      else next.add(type);
+                      return next;
+                    })
+                  }
+                  className="block w-full px-3 pb-2 text-left text-xs text-slate-500 hover:text-slate-800"
+                >
+                  {isOpen
+                    ? `▾ hide ${older.length} older version${older.length === 1 ? "" : "s"}`
+                    : `▸ show ${older.length} older version${older.length === 1 ? "" : "s"}`}
+                </button>
+                {isOpen && (
+                  <ul className="divide-y divide-slate-200 border-t border-slate-200">
+                    {older.map((d) => (
+                      <DocRow
+                        key={d.id}
+                        doc={d}
+                        clientId={clientId}
+                        onPreview={onPreview}
+                        onMsg={onMsg}
+                        muted
+                      />
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
 
@@ -482,63 +644,12 @@ export default function ClientDetailPage() {
           uploading the same bytes twice de-dupes on disk, and
           re-uploading a type bumps its version.
         </p>
-        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
-          {docs.length === 0 && (
-            <li className="p-3 text-sm text-slate-500">None yet.</li>
-          )}
-          {docs.map((d) => (
-            <li
-              key={d.id}
-              id={`doc-${d.id}`}
-              className="flex items-center justify-between p-3 text-sm target:bg-amber-50"
-            >
-              <span className="flex flex-col">
-                <span>
-                  <span className="font-medium">{d.type}</span>{" "}
-                  <span className="text-xs text-slate-500">v{d.version}</span>
-                </span>
-                {d.filename && (
-                  <button
-                    onClick={() => d.s3_key && setPreviewDoc(d)}
-                    disabled={!d.s3_key}
-                    className="text-left text-xs text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline disabled:no-underline disabled:hover:text-slate-500"
-                  >
-                    {d.filename}
-                    {typeof d.size_bytes === "number" &&
-                      ` · ${formatBytes(d.size_bytes)}`}
-                  </button>
-                )}
-              </span>
-              {d.s3_key ? (
-                <span className="flex items-center gap-3">
-                  <button
-                    onClick={() => setPreviewDoc(d)}
-                    className="text-xs text-slate-700 underline"
-                  >
-                    preview
-                  </button>
-                  <button
-                    onClick={() =>
-                      downloadFile(
-                        `/clients/${id}/documents/${d.id}/download`,
-                        d.filename ?? `${d.type}-v${d.version}`,
-                      ).catch((e) =>
-                        setMsg(
-                          e instanceof Error ? e.message : "Download failed",
-                        ),
-                      )
-                    }
-                    className="text-xs text-slate-700 underline"
-                  >
-                    download ↓
-                  </button>
-                </span>
-              ) : (
-                <span className="text-xs italic text-slate-400">no file</span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <DocumentList
+          docs={docs}
+          clientId={id}
+          onPreview={(d) => setPreviewDoc(d)}
+          onMsg={setMsg}
+        />
         <form
           className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]"
           onSubmit={async (e) => {
