@@ -34,6 +34,8 @@ class Approval(Base):
     reviewer_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    # Reviewer's reason on reject, or note on edit&approve.
+    note: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
