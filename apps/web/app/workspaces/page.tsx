@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { apiFetch, clearToken, getToken } from "@/lib/api";
+import { apiFetch, getToken } from "@/lib/api";
+import Nav from "@/app/Nav";
 
 type Client = {
   id: string;
@@ -54,19 +55,10 @@ export default function WorkspacesPage() {
     }
   }
 
-  function signOut() {
-    clearToken();
-    router.replace("/login");
-  }
-
   return (
     <main className="mx-auto max-w-3xl p-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Client workspaces</h1>
-        <button onClick={signOut} className="text-sm text-slate-500 underline">
-          Sign out
-        </button>
-      </div>
+      <Nav />
+      <h1 className="text-2xl font-semibold">Client workspaces</h1>
 
       <form onSubmit={createClient} className="mt-6 flex gap-2">
         <input
