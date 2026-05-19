@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.approval import Approval
+from app.models.credential import Credential
 from app.models.document import Document
 
 
@@ -55,9 +56,38 @@ async def _execute_signature(
     )
 
 
+async def _execute_portal_action(
+    approval: Approval, client_id: uuid.UUID, db: AsyncSession
+) -> str:
+    payload = approval.payload or {}
+    service = str(payload.get("service") or "")
+    action = str(payload.get("action") or "")
+    cred = await db.scalar(
+        select(Credential).where(
+            Credential.client_id == client_id, Credential.service == service
+        )
+    )
+    if cred is None:
+        return (
+            f"Approved, but cannot execute: no credential on file for "
+            f"'{service}'. Add it under Credentials vault and retry."
+        )
+    doc_type = f"portal_action:{service}:{action}"
+    version = await _next_version(db, client_id, doc_type)
+    db.add(Document(client_id=client_id, type=doc_type, version=version))
+    return (
+        f"Authenticated '{action}' on '{service}' prepared using the "
+        f"stored credential (vault id {cred.id}). Recorded in the "
+        f"Document Hub as {doc_type} (v{version}). The external portal "
+        f"call itself is performed by the integration layer "
+        f"(Playwright/HTTP, not yet wired)."
+    )
+
+
 EXECUTORS: dict[str, Callable[[Approval, uuid.UUID, AsyncSession], Awaitable[str]]] = {
     "queue_filing_submission": _execute_filing,
     "send_document_for_signature": _execute_signature,
+    "request_portal_action": _execute_portal_action,
 }
 
 

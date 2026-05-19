@@ -410,3 +410,40 @@ check_client_credentials = Tool(
     tier=TIER_AUTO,
     db_runner=_check_client_credentials,
 )
+
+
+request_portal_action = Tool(
+    name="request_portal_action",
+    description=(
+        "Request a credential-backed action on an external service "
+        "(FCC CORES, state PUC, IRS, carrier portal, bank). Tier-2: it "
+        "queues for operator approval. On approval the platform uses the "
+        "stored credential server-side to perform the action — the agent "
+        "never sees the secret. Never claim the action was done; only "
+        "that it was queued."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "service": {
+                "type": "string",
+                "description": "Credential key, e.g. 'fcc_cores', 'state_puc_tx', 'irs'.",
+            },
+            "action": {
+                "type": "string",
+                "description": "What to do, e.g. 'submit_499_q', 'check_filer_status'.",
+            },
+            "summary": {
+                "type": "string",
+                "description": "Plain-language summary the operator will see.",
+            },
+            "params": {
+                "type": "object",
+                "description": "Action-specific parameters (no secrets).",
+            },
+        },
+        "required": ["service", "action", "summary"],
+    },
+    tier=TIER_APPROVE,
+    runner=None,
+)
