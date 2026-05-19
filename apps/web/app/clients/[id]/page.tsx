@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch, downloadFile, fetchBlob } from "@/lib/api";
 import AppShell from "@/app/AppShell";
+import IntakeForm, { type IntakeFields } from "./IntakeForm";
 
 type RequiredDoc = {
   key: string;
@@ -195,7 +196,6 @@ export default function ClientDetailPage() {
     username: "",
     secret: "",
   });
-  const [intakeText, setIntakeText] = useState("{}");
   const [docType, setDocType] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
@@ -216,7 +216,6 @@ export default function ClientDetailPage() {
       ]);
       setMeta(clients.find((c) => c.id === id) ?? null);
       setIntake(st);
-      setIntakeText(JSON.stringify(st.intake ?? {}, null, 2));
       setDocs(d);
       setTasks(t);
       setAudit(au);
@@ -255,24 +254,6 @@ export default function ClientDetailPage() {
           body: form,
         }),
       `Uploaded ${file.name} as ${typeKey}.`,
-    );
-  }
-
-  function saveIntake() {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(intakeText);
-    } catch {
-      setMsg("Intake is not valid JSON");
-      return;
-    }
-    act(
-      () =>
-        apiFetch(`/clients/${id}/intake`, {
-          method: "PUT",
-          body: JSON.stringify(parsed),
-        }),
-      "Intake saved.",
     );
   }
 
@@ -440,33 +421,33 @@ export default function ClientDetailPage() {
             </ul>
           </div>
         )}
-        <textarea
-          className="mt-3 h-40 w-full rounded-md border border-slate-300 p-2 font-mono text-xs"
-          value={intakeText}
-          onChange={(e) => setIntakeText(e.target.value)}
+        <IntakeForm
+          intake={(intake?.intake ?? null) as IntakeFields | null}
+          busy={busy}
+          onSave={(payload) =>
+            act(
+              () =>
+                apiFetch(`/clients/${id}/intake`, {
+                  method: "PUT",
+                  body: JSON.stringify(payload),
+                }),
+              "Intake saved.",
+            )
+          }
         />
-        <div className="mt-2 flex gap-2">
-          <button
-            disabled={busy}
-            onClick={saveIntake}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            Save intake
-          </button>
-          <button
-            disabled={busy}
-            onClick={() =>
-              act(
-                () =>
-                  apiFetch(`/clients/${id}/intake/submit`, { method: "POST" }),
-                "Intake submitted — client fully onboarded.",
-              )
-            }
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-          >
-            Submit intake
-          </button>
-        </div>
+        <button
+          disabled={busy}
+          onClick={() =>
+            act(
+              () =>
+                apiFetch(`/clients/${id}/intake/submit`, { method: "POST" }),
+              "Intake submitted — client fully onboarded.",
+            )
+          }
+          className="mt-3 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+        >
+          Submit intake
+        </button>
       </section>
 
       {/* Documents */}
