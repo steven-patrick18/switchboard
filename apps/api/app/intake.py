@@ -42,17 +42,33 @@ class RequiredDoc:
 # (label, needs_scan). The decision of WHICH apply to a given client is
 # made by resolve_required_documents below — not a flat fixed list.
 _CATALOG: dict[str, tuple[str, bool]] = {
+    # Founder stage — what a single person can give before the entity
+    # exists (KYC + the basis to form the LLC and obtain the EIN).
+    "ssn_card": ("Social Security card or SSN/ITIN confirmation", True),
+    "drivers_license": ("Driver's license or government photo ID", True),
+    "founder_photo": ("Recent photo of the founder", False),
+    "utility_bill": ("Utility bill — proof of personal address", True),
+    # Entity stage — only collectable once the company is formed.
     "formation_certificate": ("Certificate of Formation / Articles", False),
     "ein_letter": ("IRS EIN letter (CP-575)", False),
     "officer_government_id": ("Officer government-issued ID", True),
     "proof_of_address": ("Proof of principal business address", True),
     "banking_letter": ("Bank letter for carrier deposits", True),
-    "corporate_authorization": ("Board resolution / signing authority", True),
+    "corporate_authorization": ("Member/board signing authority", True),
     "section_214_support": ("FCC Section 214 international support", False),
     "state_cpcn_notarized": ("Notarized state CPCN packet", True),
 }
 
-_BASE = (
+# A single founder starts here — personal docs, pre-formation.
+_FOUNDER = (
+    "ssn_card",
+    "drivers_license",
+    "founder_photo",
+    "utility_bill",
+)
+
+# Once the entity is formed (EIN captured) the corporate docs apply.
+_ENTITY_BASE = (
     "formation_certificate",
     "ein_letter",
     "officer_government_id",
@@ -60,6 +76,16 @@ _BASE = (
     "banking_letter",
     "corporate_authorization",
 )
+
+STAGE_FOUNDER = "founder"
+STAGE_ENTITY = "entity"
+
+
+def intake_stage(intake: ClientIntake | None) -> str:
+    """Founder stage until the company is formed (EIN captured), then
+    entity stage. This is what lets a single person start from scratch."""
+    ein = getattr(intake, "ein", None) if intake is not None else None
+    return STAGE_ENTITY if (ein or "").strip() else STAGE_FOUNDER
 
 
 def catalog_entry(key: str) -> tuple[str, bool] | None:
@@ -77,16 +103,19 @@ def _doc(key: str) -> RequiredDoc:
 
 
 def resolve_required_documents(intake: ClientIntake | None) -> list[RequiredDoc]:
-    """Automatically decide the mandated documents for THIS client from
-    its intake. Deterministic policy (the codified operator judgment);
-    works without an LLM/key. International intent and target states pull
-    in extra mandated docs."""
-    keys = list(_BASE)
-    if intake is not None:
-        if getattr(intake, "intends_international", False):
-            keys.append("section_214_support")
-        if intake.target_states:
-            keys.append("state_cpcn_notarized")
+    """Automatically decide the mandated documents for THIS client and
+    its onboarding stage. A single founder with no entity yet is asked
+    only for personal docs they can actually give now; the corporate
+    documents become mandated once the entity is formed (EIN captured).
+    International intent and target states pull in extra entity-stage
+    docs. Deterministic — works without an LLM/key."""
+    if intake_stage(intake) == STAGE_FOUNDER:
+        return [_doc(k) for k in _FOUNDER]
+    keys = list(_ENTITY_BASE)
+    if getattr(intake, "intends_international", False):
+        keys.append("section_214_support")
+    if intake is not None and intake.target_states:
+        keys.append("state_cpcn_notarized")
     return [_doc(k) for k in keys]
 
 
@@ -109,6 +138,7 @@ class Completeness:
     missing_fields: list[str]
     missing_documents: list[str]
     required_documents: list[RequiredDoc]
+    stage: str
 
     @property
     def complete(self) -> bool:
@@ -138,4 +168,5 @@ def evaluate(
         missing_fields=missing_fields,
         missing_documents=missing_documents,
         required_documents=required,
+        stage=intake_stage(intake),
     )

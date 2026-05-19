@@ -16,6 +16,7 @@ type RequiredDoc = {
 };
 type Completeness = {
   complete: boolean;
+  stage: string;
   missing_fields: string[];
   missing_documents: string[];
   required_documents: RequiredDoc[];
@@ -178,7 +179,10 @@ export default function ClientDetailPage() {
           <div className="mt-3">
             <div className="flex items-center justify-between">
               <div className="text-xs uppercase tracking-wide text-slate-500">
-                Mandated documents (auto-decided for this client) — *required
+                {c.stage === "founder"
+                  ? "Founder onboarding — start here (personal docs)"
+                  : "Entity documents"}{" "}
+                — *required
               </div>
               <button
                 onClick={() =>

@@ -49,12 +49,19 @@ def test_pdf_pack_assembly_base_and_tailored():
     text = _pdf_text(data)
     assert "Document Request" in text and "Acme VoIP LLC" in text
     assert "Checklist" in text
-    assert "Officer government-issued ID" in text
-    assert "Notarized state CPCN packet" not in text  # no states in base
+    # No intake yet → founder stage: personal docs only.
+    assert "Driver's license" in text
+    assert "Social Security" in text
+    assert "Officer government-issued ID" not in text
+    assert "Notarized state CPCN packet" not in text
 
-    tailored = SimpleNamespace(intends_international=True, target_states=["TX"])
+    # Formed entity (EIN captured) + international + target states.
+    tailored = SimpleNamespace(
+        ein="99-1234567", intends_international=True, target_states=["TX"]
+    )
     _, d2 = build_request_pack_pdf("Acme", resolve_required_documents(tailored))
     t2 = _pdf_text(d2)
+    assert "Certificate of Formation" in t2
     assert "Notarized state CPCN packet" in t2
     assert "FCC Section 214 international support" in t2
 

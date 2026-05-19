@@ -48,6 +48,7 @@ async def _status(client_id: uuid.UUID, db: AsyncSession) -> IntakeStatus:
         intake=intake,
         completeness=CompletenessOut(
             complete=c.complete,
+            stage=c.stage,
             missing_fields=c.missing_fields,
             missing_documents=c.missing_documents,
             required_documents=[

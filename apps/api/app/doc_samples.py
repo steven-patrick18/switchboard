@@ -6,6 +6,27 @@ from app.intake import catalog_entry, catalog_keys
 
 # What the client must send for each document type.
 _BODY: dict[str, str] = {
+    "ssn_card": (
+        "A clear scan of the founder's Social Security card, or an "
+        "SSA/IRS document showing the SSN (or an ITIN confirmation). Used "
+        "for KYC and to form the entity / obtain the EIN. Do not send "
+        "this over unencrypted channels — use the secure upload."
+    ),
+    "drivers_license": (
+        "The founder's unexpired driver's license or government photo ID "
+        "— color scan of the front (and back if the address is on it), "
+        "all four corners visible and legible."
+    ),
+    "founder_photo": (
+        "A recent, clear passport-style photo of the founder (head and "
+        "shoulders, plain background, good lighting). Used for carrier "
+        "KYC. A phone photo is fine — no scan needed."
+    ),
+    "utility_bill": (
+        "A utility bill (electric, water, gas, or internet) in the "
+        "founder's name, dated within the last 90 days, showing the "
+        "name and residential address."
+    ),
     "formation_certificate": (
         "The state-issued document proving the entity was formed "
         "(Certificate of Formation / Articles of Organization or "

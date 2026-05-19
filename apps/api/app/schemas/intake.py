@@ -38,6 +38,7 @@ class RequiredDocOut(BaseModel):
 
 class CompletenessOut(BaseModel):
     complete: bool
+    stage: str
     missing_fields: list[str]
     missing_documents: list[str]
     required_documents: list[RequiredDocOut]
