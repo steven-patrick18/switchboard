@@ -70,7 +70,11 @@ async def run_agent(
 
     model = spec.model or settings.agent_model
     ctx = ToolContext(
-        db=db, client_id=client_id, project_id=project_id, task_id=task_id
+        db=db,
+        client_id=client_id,
+        project_id=project_id,
+        task_id=task_id,
+        agent_name=spec.name,
     )
     # Frozen system prompt → cache the prefix (tools + system).
     system = [

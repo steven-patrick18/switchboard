@@ -1,6 +1,7 @@
 from app.agents.base import AgentSpec
 from app.agents.tools import (
     assign_task,
+    check_client_credentials,
     check_intake_status,
     get_voip_launch_playbook,
 )
@@ -28,5 +29,10 @@ PM_AGENT = AgentSpec(
         "Finish with a concise briefing: blockers first, then the assigned "
         "tasks, then the operator's prioritized next actions."
     ),
-    tools=[check_intake_status, get_voip_launch_playbook, assign_task],
+    tools=[
+        check_intake_status,
+        check_client_credentials,
+        get_voip_launch_playbook,
+        assign_task,
+    ],
 )

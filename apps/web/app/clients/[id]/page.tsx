@@ -26,6 +26,13 @@ type IntakeStatus = {
   completeness: Completeness;
 };
 type Doc = { id: string; type: string; version: number; created_at: string };
+type Cred = {
+  id: string;
+  service: string;
+  username: string | null;
+  expires_at: string | null;
+  last_accessed_at: string | null;
+};
 type Task = {
   id: string;
   agent: string;
@@ -52,6 +59,12 @@ export default function ClientDetailPage() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [audit, setAudit] = useState<Audit[]>([]);
+  const [creds, setCreds] = useState<Cred[]>([]);
+  const [credForm, setCredForm] = useState({
+    service: "",
+    username: "",
+    secret: "",
+  });
   const [intakeText, setIntakeText] = useState("{}");
   const [docType, setDocType] = useState("");
   const [agent, setAgent] = useState("compliance");
@@ -61,12 +74,13 @@ export default function ClientDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [clients, st, d, t, au] = await Promise.all([
+      const [clients, st, d, t, au, cr] = await Promise.all([
         apiFetch<ClientMeta[]>("/clients"),
         apiFetch<IntakeStatus>(`/clients/${id}/intake`),
         apiFetch<Doc[]>(`/clients/${id}/documents`),
         apiFetch<Task[]>(`/clients/${id}/tasks`),
         apiFetch<Audit[]>(`/clients/${id}/audit`),
+        apiFetch<Cred[]>(`/clients/${id}/credentials`),
       ]);
       setMeta(clients.find((c) => c.id === id) ?? null);
       setIntake(st);
@@ -74,6 +88,7 @@ export default function ClientDetailPage() {
       setDocs(d);
       setTasks(t);
       setAudit(au);
+      setCreds(cr);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to load");
     }
@@ -321,6 +336,106 @@ export default function ClientDetailPage() {
             Add
           </button>
         </div>
+      </section>
+
+      {/* Credentials vault */}
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Credentials vault
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          External logins (FCC CORES, IRS, state PUC, bank, carrier portals,
+          …). Encrypted at rest. Agents can see <i>which</i> services are on
+          file (audited) — they can never see the secret; the platform uses
+          it on the client's behalf.
+        </p>
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+          {creds.length === 0 && (
+            <li className="p-3 text-sm text-slate-500">No credentials yet.</li>
+          )}
+          {creds.map((c) => (
+            <li key={c.id} className="flex items-center justify-between p-3 text-sm">
+              <span>
+                <span className="font-medium">{c.service}</span>
+                {c.username && (
+                  <span className="ml-2 text-slate-500">({c.username})</span>
+                )}
+              </span>
+              <span className="flex items-center gap-3">
+                {c.expires_at && (
+                  <span className="text-xs text-slate-500">
+                    expires {new Date(c.expires_at).toLocaleDateString()}
+                  </span>
+                )}
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    act(
+                      () =>
+                        apiFetch(`/clients/${id}/credentials/${c.id}`, {
+                          method: "DELETE",
+                        }),
+                      `Removed ${c.service}.`,
+                    )
+                  }
+                  className="text-xs text-red-600 underline"
+                >
+                  delete
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <input
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Service (e.g. fcc_cores)"
+            value={credForm.service}
+            onChange={(e) =>
+              setCredForm({ ...credForm, service: e.target.value })
+            }
+          />
+          <input
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Username (optional)"
+            value={credForm.username}
+            onChange={(e) =>
+              setCredForm({ ...credForm, username: e.target.value })
+            }
+          />
+          <input
+            type="password"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Secret"
+            value={credForm.secret}
+            onChange={(e) =>
+              setCredForm({ ...credForm, secret: e.target.value })
+            }
+            autoComplete="new-password"
+          />
+        </div>
+        <button
+          disabled={busy || !credForm.service.trim() || !credForm.secret.trim()}
+          onClick={() =>
+            act(
+              () =>
+                apiFetch(`/clients/${id}/credentials`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    service: credForm.service,
+                    username: credForm.username || null,
+                    secret: credForm.secret,
+                  }),
+                }),
+              `${credForm.service} stored.`,
+            ).then(() =>
+              setCredForm({ service: "", username: "", secret: "" }),
+            )
+          }
+          className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+        >
+          Store credential
+        </button>
       </section>
 
       {/* Run an agent */}

@@ -9,6 +9,7 @@ from app.api.routes import (
     auth,
     briefing,
     clients,
+    credentials,
     intake,
     tasks,
 )
@@ -33,6 +34,7 @@ app.include_router(agents.router)
 app.include_router(approvals.router)
 app.include_router(briefing.router)
 app.include_router(audit.router)
+app.include_router(credentials.router)
 
 
 @app.get("/health")

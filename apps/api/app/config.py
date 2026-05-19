@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # Browser origins allowed to call the API (comma-separated).
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Dedicated key for credential-vault encryption. Falls back to
+    # app_secret_key if unset; back with a real KMS/Vault in production.
+    credential_enc_key: str = ""
+
     # Auth
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24

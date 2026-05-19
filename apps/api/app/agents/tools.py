@@ -29,6 +29,7 @@ class ToolContext:
     client_id: uuid.UUID | None
     project_id: uuid.UUID | None
     task_id: uuid.UUID
+    agent_name: str = "agent"
 
 
 @dataclass(frozen=True)
@@ -365,4 +366,47 @@ assign_task = Tool(
     },
     tier=TIER_AUTO_NOTIFY,
     db_runner=_assign_task,
+)
+
+
+# --- Credential vault (availability only — never the secret) ---
+
+
+async def _check_client_credentials(_args: dict, ctx: ToolContext) -> str:
+    if ctx.client_id is None:
+        return "No client context available."
+    from app.vault import credential_availability
+
+    rows = await credential_availability(
+        ctx.db, ctx.client_id, actor=ctx.agent_name
+    )
+    if not rows:
+        return (
+            "No external login credentials are on file for this client. "
+            "The operator must add them (e.g. FCC CORES, IRS, state PUC, "
+            "bank, carrier portals) before those steps can be actioned."
+        )
+    parts = []
+    for r in rows:
+        state = "EXPIRED" if r["expired"] else "available"
+        parts.append(f"{r['service']} ({state})")
+    return (
+        "Credentials on file (you cannot see the secrets — the platform "
+        "uses them on your behalf, and this lookup was audited): "
+        + ", ".join(parts)
+        + ". Plan around missing/expired services."
+    )
+
+
+check_client_credentials = Tool(
+    name="check_client_credentials",
+    description=(
+        "List which external services have a login credential on file "
+        "for this client (and whether expired). Never returns secrets — "
+        "the platform uses them server-side. Read-only; the lookup is "
+        "audited."
+    ),
+    input_schema={"type": "object", "properties": {}},
+    tier=TIER_AUTO,
+    db_runner=_check_client_credentials,
 )
