@@ -18,6 +18,7 @@ class ApprovalOut(BaseModel):
     note: str | None
     executed_at: datetime | None
     execution_result: str | None
+    result_document_id: uuid.UUID | None
     ts: datetime
 
 

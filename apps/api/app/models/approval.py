@@ -43,6 +43,11 @@ class Approval(Base):
     execution_result: Mapped[str | None] = mapped_column(
         String(2000), nullable=True
     )
+    # Set when the executor materializes a Document Hub artifact, so the
+    # history view can deep-link to it.
+    result_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

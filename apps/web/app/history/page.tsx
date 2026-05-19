@@ -175,6 +175,15 @@ export default function HistoryPage() {
                   {a.execution_result}
                 </pre>
               )}
+              {a.result_document_id && (
+                <a
+                  href={`/clients/${a.client_id}#doc-${a.result_document_id}`}
+                  className="mt-2 inline-block text-xs text-slate-700 underline"
+                >
+                  → open the resulting document in {a.client_name}'s
+                  Document Hub
+                </a>
+              )}
             </li>
           );
         })}

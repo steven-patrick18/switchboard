@@ -33,7 +33,10 @@ async def _execute_filing(
     payload = approval.payload or {}
     form = str(payload.get("form") or "filing")
     version = await _next_version(db, client_id, form)
-    db.add(Document(client_id=client_id, type=form, version=version))
+    doc = Document(client_id=client_id, type=form, version=version)
+    db.add(doc)
+    await db.flush()
+    approval.result_document_id = doc.id
     return (
         f"Recorded {form} (v{version}) in the Document Hub. The external "
         f"submission to FCC is performed by the integration layer (not yet "
@@ -48,7 +51,10 @@ async def _execute_signature(
     doc_type = str(payload.get("doc_type") or "document")
     recipient = str(payload.get("recipient") or "the recipient")
     version = await _next_version(db, client_id, doc_type)
-    db.add(Document(client_id=client_id, type=doc_type, version=version))
+    doc = Document(client_id=client_id, type=doc_type, version=version)
+    db.add(doc)
+    await db.flush()
+    approval.result_document_id = doc.id
     return (
         f"Recorded a signature request for {doc_type} (v{version}) to "
         f"{recipient} in the Document Hub. The Documenso send is performed "
@@ -88,7 +94,10 @@ async def _execute_portal_action(
 
     doc_type = f"portal_action:{service}:{action}"
     version = await _next_version(db, client_id, doc_type)
-    db.add(Document(client_id=client_id, type=doc_type, version=version))
+    doc = Document(client_id=client_id, type=doc_type, version=version)
+    db.add(doc)
+    await db.flush()
+    approval.result_document_id = doc.id
     label = spec.label if spec is not None else f"'{action}' on '{service}'"
     note = "" if spec is not None else " (action not in registry — free-form)"
     return (

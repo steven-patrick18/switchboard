@@ -306,7 +306,11 @@ export default function ClientDetailPage() {
             <li className="p-3 text-sm text-slate-500">None yet.</li>
           )}
           {docs.map((d) => (
-            <li key={d.id} className="flex justify-between p-3 text-sm">
+            <li
+              key={d.id}
+              id={`doc-${d.id}`}
+              className="flex justify-between p-3 text-sm target:bg-amber-50"
+            >
               <span>{d.type}</span>
               <span className="text-slate-500">v{d.version}</span>
             </li>

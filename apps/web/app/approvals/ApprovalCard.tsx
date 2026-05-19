@@ -17,6 +17,7 @@ export type Approval = {
   note: string | null;
   executed_at: string | null;
   execution_result: string | null;
+  result_document_id: string | null;
   ts: string;
 };
 

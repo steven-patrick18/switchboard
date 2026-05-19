@@ -49,6 +49,7 @@ def _out(approval: Approval, client: Client) -> ApprovalOut:
         note=approval.note,
         executed_at=approval.executed_at,
         execution_result=approval.execution_result,
+        result_document_id=approval.result_document_id,
         ts=approval.ts,
     )
 

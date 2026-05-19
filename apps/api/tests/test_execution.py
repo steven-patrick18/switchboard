@@ -267,14 +267,17 @@ async def test_portal_action_http_flow(http):
         (await c.post("/clients", headers=h, json={"name": "Acme"})).json()["id"]
     )
 
-    # No credential yet → approve produces the explicit message, no Document.
+    # No credential yet → approve produces the explicit message, no Document
+    # and no linked result document.
     a_no = await _seed_portal(maker, cid)
     r = await c.post(f"/approvals/{a_no}/approve", headers=h, json={})
     assert r.status_code == 200
     assert "no credential on file" in r.json()["execution_result"]
+    assert r.json()["result_document_id"] is None
     assert (await c.get(f"/clients/{cid}/documents", headers=h)).json() == []
 
-    # Store the credential via API; approve again → Document materialized.
+    # Store the credential via API; approve again → Document materialized
+    # AND the approval row links to it (history deep-link works).
     await c.post(
         f"/clients/{cid}/credentials",
         headers=h,
@@ -283,8 +286,12 @@ async def test_portal_action_http_flow(http):
     a_ok = await _seed_portal(maker, cid)
     r = await c.post(f"/approvals/{a_ok}/approve", headers=h, json={})
     assert r.status_code == 200
-    assert "portal_action:fcc_cores:submit_499_q" in r.json()["execution_result"]
+    body = r.json()
+    assert "portal_action:fcc_cores:submit_499_q" in body["execution_result"]
+    assert body["result_document_id"] is not None
     docs = (await c.get(f"/clients/{cid}/documents", headers=h)).json()
     assert any(
-        d["type"] == "portal_action:fcc_cores:submit_499_q" for d in docs
+        d["type"] == "portal_action:fcc_cores:submit_499_q"
+        and d["id"] == body["result_document_id"]
+        for d in docs
     )
