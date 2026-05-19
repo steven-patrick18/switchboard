@@ -31,3 +31,20 @@ Stack: Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.x (async) · Alembi
 
 Config is read from the repo-root `.env` (see `.env.example`). The default
 `DATABASE_URL` matches the Docker Compose Postgres credentials.
+
+## Agents
+
+`app/agents/` holds the Claude Agent runtime. Phase 1: the Compliance
+Agent. Every tool is tier-classified — T0/T1 run inline, **T2/T3 are
+intercepted and queued to the approval table; they never execute until an
+operator approves**. Run it via `POST /agents/compliance/run`
+(`{client_id, instruction}`), which needs `ANTHROPIC_API_KEY` set.
+
+## Tests
+
+```
+pytest
+```
+
+`tests/test_agent_gateway.py` verifies the approval gateway with a fake
+Anthropic client — no API spend. `scripts/smoke.py` is the HTTP smoke test.

@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     anthropic_api_key: str = ""
+    # Default model for agents. Per-agent specs may override. Opus 4.7 is the
+    # capable default; the brief's Haiku/Sonnet cost tiers are a deliberate
+    # per-agent config choice, not a silent downgrade.
+    agent_model: str = "claude-opus-4-7"
+    agent_effort: str = "high"
+    agent_max_tokens: int = 16000
+    agent_max_iterations: int = 12
 
     # Auth
     jwt_algorithm: str = "HS256"
