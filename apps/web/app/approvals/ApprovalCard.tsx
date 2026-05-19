@@ -15,6 +15,8 @@ export type Approval = {
   decision: string;
   reviewer_id: string | null;
   note: string | null;
+  executed_at: string | null;
+  execution_result: string | null;
   ts: string;
 };
 

@@ -79,13 +79,25 @@ def _require_pending(approval: Approval) -> None:
 @router.get("", response_model=list[ApprovalOut])
 async def list_approvals(
     decision: str = Query(default=DECISION_PENDING),
+    client_id: uuid.UUID | None = Query(default=None),
+    action_type: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=500),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ApprovalOut]:
     stmt = _OWNED.where(Client.owner_id == user.id)
-    if decision != "all":
+    # `decided` is the history view's meta-value: everything not pending.
+    if decision == "decided":
+        stmt = stmt.where(Approval.decision != DECISION_PENDING)
+    elif decision != "all":
         stmt = stmt.where(Approval.decision == decision)
-    rows = (await db.execute(stmt.order_by(Approval.ts.desc()))).all()
+    if client_id is not None:
+        stmt = stmt.where(Client.id == client_id)
+    if action_type is not None:
+        stmt = stmt.where(Approval.action_type == action_type)
+    rows = (
+        await db.execute(stmt.order_by(Approval.ts.desc()).limit(limit))
+    ).all()
     return [_out(a, c) for a, c in rows]
 
 
