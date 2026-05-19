@@ -1,13 +1,14 @@
 from fastapi import FastAPI
 from sqlalchemy import text
 
-from app.api.routes import auth
+from app.api.routes import auth, clients
 from app.config import settings
 from app.db import engine
 
 app = FastAPI(title="Switchboard API", version="0.1.0")
 
 app.include_router(auth.router)
+app.include_router(clients.router)
 
 
 @app.get("/health")
