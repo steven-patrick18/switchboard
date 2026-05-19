@@ -807,9 +807,24 @@ export default function ClientDetailPage() {
 
       {/* Audit trail */}
       <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Audit trail
-        </h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Audit trail
+          </h2>
+          <button
+            onClick={() =>
+              downloadFile(
+                `/clients/${id}/audit.csv`,
+                `${meta?.name ?? "client"}-audit.csv`,
+              ).catch((e) =>
+                setMsg(e instanceof Error ? e.message : "Export failed"),
+              )
+            }
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+          >
+            Export CSV ↓
+          </button>
+        </div>
         <p className="mt-1 text-xs text-slate-500">
           Immutable, append-only — every queued / decided / executed action.
         </p>

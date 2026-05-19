@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadFile } from "@/lib/api";
 import AppShell from "@/app/AppShell";
 
 type BriefingClient = {
@@ -60,11 +60,23 @@ export default function DashboardPage() {
     <AppShell>
       <div className="flex items-baseline justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Daily briefing</h1>
-        {b && (
-          <span className="text-xs text-slate-500">
-            generated {new Date(b.generated_at).toLocaleString()}
-          </span>
-        )}
+        <div className="flex items-baseline gap-4">
+          {b && (
+            <span className="text-xs text-slate-500">
+              generated {new Date(b.generated_at).toLocaleString()}
+            </span>
+          )}
+          <button
+            onClick={() =>
+              downloadFile("/audit.csv", "switchboard-audit.csv").catch((e) =>
+                setError(e instanceof Error ? e.message : "Export failed"),
+              )
+            }
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+          >
+            Export audit ↓
+          </button>
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
