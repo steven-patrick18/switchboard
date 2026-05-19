@@ -9,6 +9,7 @@ from app.audit import record_audit
 from app.config import settings
 from app.models.agent_run import AgentRun
 from app.models.approval import DECISION_PENDING, Approval
+from app.notifications import notify_approval_queued
 
 # USD per 1M tokens (input, output). Cache reads ~0.1x, writes ~1.25x.
 _PRICING = {
@@ -165,6 +166,10 @@ async def run_agent(
                     client_id=client_id,
                     after={"tier": tool.tier, "payload": dict(block.input)},
                 )
+                # Best-effort email — never blocks the agent loop.
+                await _notify_owner_of_approval(
+                    db, client_id, approval, tool.name, tool.tier
+                )
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -202,3 +207,39 @@ async def run_agent(
     )
     await db.commit()
     return result
+
+
+async def _notify_owner_of_approval(
+    db: AsyncSession,
+    client_id: uuid.UUID,
+    approval: Approval,
+    action_type: str,
+    tier: str,
+) -> None:
+    """Look up the client's owning operator and best-effort email them
+    that a tool-use was queued for approval. The notify helper swallows
+    SMTP errors so the agent loop is never blocked by a misconfig."""
+    # Local imports to avoid touching the import order of the agents
+    # package on test paths that never trigger gated tools.
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.client import Client  # noqa: PLC0415
+    from app.models.user import User  # noqa: PLC0415
+
+    row = (
+        await db.execute(
+            select(User.email, Client.name)
+            .join(Client, Client.owner_id == User.id)
+            .where(Client.id == client_id)
+        )
+    ).first()
+    if row is None:
+        return
+    email, client_name = row
+    await notify_approval_queued(
+        to=email,
+        client_name=client_name,
+        action_type=action_type,
+        tier=tier,
+        approval_id=str(approval.id),
+    )

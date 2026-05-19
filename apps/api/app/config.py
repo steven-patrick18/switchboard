@@ -42,6 +42,20 @@ class Settings(BaseSettings):
     # first write so test fixtures can override it before any I/O.
     documents_dir: str = ".documents"
 
+    # Best-effort SMTP notifications. All empty → email is disabled and
+    # the platform never blocks on delivery. Pending-approval emails go
+    # to the client's owning operator; the in-app badge stays the source
+    # of truth either way.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+    # Public URL used in email bodies (e.g. https://switchboard.example.com).
+    # Empty falls back to relative paths.
+    app_base_url: str = ""
+
     # Auth
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
