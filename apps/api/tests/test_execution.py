@@ -189,7 +189,12 @@ async def _seed_portal(maker, client_id, service="fcc_cores", action="submit_499
             task_id=t.id,
             action_type="request_portal_action",
             tier=TIER_APPROVE,
-            payload={"service": service, "action": action, "summary": "go"},
+            payload={
+                "service": service,
+                "action": action,
+                "summary": "go",
+                "params": {"quarter": "Q1", "revenue": 1000},
+            },
             decision=DECISION_PENDING,
         )
         s.add(a)
@@ -210,6 +215,7 @@ async def test_portal_action_unit(db: AsyncSession):
             "service": "fcc_cores",
             "action": "submit_499_q",
             "summary": "go",
+            "params": {"quarter": "Q1", "revenue": 1000},
         },
         decision=DECISION_APPROVED,
     )
@@ -233,6 +239,7 @@ async def test_portal_action_unit(db: AsyncSession):
             "service": "fcc_cores",
             "action": "submit_499_q",
             "summary": "go",
+            "params": {"quarter": "Q1", "revenue": 1000},
         },
         decision=DECISION_APPROVED,
     )

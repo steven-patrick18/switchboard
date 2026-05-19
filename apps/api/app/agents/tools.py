@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.intake import evaluate as evaluate_intake
+from app.portal_actions import services as _portal_services_list
 from app.models.approval import (
     TIER_APPROVE,
     TIER_AUTO,
@@ -427,11 +428,16 @@ request_portal_action = Tool(
         "properties": {
             "service": {
                 "type": "string",
-                "description": "Credential key, e.g. 'fcc_cores', 'state_puc_tx', 'irs'.",
+                "enum": _portal_services_list(),
+                "description": "Credential key — pick from the supported services.",
             },
             "action": {
                 "type": "string",
-                "description": "What to do, e.g. 'submit_499_q', 'check_filer_status'.",
+                "description": (
+                    "Known actions are listed in the portal-action catalog "
+                    "(e.g. 'check_filer_status', 'submit_499_q', "
+                    "'check_cpcn_status'). Use one of those when applicable."
+                ),
             },
             "summary": {
                 "type": "string",
@@ -439,7 +445,10 @@ request_portal_action = Tool(
             },
             "params": {
                 "type": "object",
-                "description": "Action-specific parameters (no secrets).",
+                "description": (
+                    "Action-specific parameters (no secrets). Required keys "
+                    "depend on the action — see the catalog."
+                ),
             },
         },
         "required": ["service", "action", "summary"],

@@ -18,6 +18,16 @@ export type Approval = {
   ts: string;
 };
 
+export type PortalActionSpec = {
+  service: string;
+  action: string;
+  label: string;
+  description: string;
+  required_params: string[];
+  optional_params: string[];
+  tier: string;
+};
+
 const TIER_STYLE: Record<string, string> = {
   T2: "bg-amber-100 text-amber-800",
   T3: "bg-red-100 text-red-800",
@@ -25,15 +35,25 @@ const TIER_STYLE: Record<string, string> = {
 
 export default function ApprovalCard({
   approval,
+  catalog,
   selected,
   onToggle,
   onChanged,
 }: {
   approval: Approval;
+  catalog: PortalActionSpec[];
   selected: boolean;
   onToggle: (id: string) => void;
   onChanged: () => void;
 }) {
+  const portalSpec =
+    approval.action_type === "request_portal_action"
+      ? catalog.find(
+          (a) =>
+            a.service === approval.payload?.service &&
+            a.action === approval.payload?.action,
+        ) ?? null
+      : null;
   const [mode, setMode] = useState<"none" | "edit" | "reject">("none");
   const [editText, setEditText] = useState(
     JSON.stringify(approval.payload ?? {}, null, 2),
@@ -89,8 +109,15 @@ export default function ApprovalCard({
             >
               {approval.tier}
             </span>
-            <span className="text-sm text-slate-600">{approval.action_type}</span>
+            <span className="text-sm text-slate-600">
+              {portalSpec ? portalSpec.label : approval.action_type}
+            </span>
           </div>
+          {portalSpec && (
+            <p className="mt-1 text-xs text-slate-500">
+              {portalSpec.description}
+            </p>
+          )}
           <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs text-slate-700">
             {JSON.stringify(approval.payload ?? {}, null, 2)}
           </pre>

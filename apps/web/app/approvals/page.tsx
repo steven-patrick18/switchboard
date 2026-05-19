@@ -5,18 +5,27 @@ import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch, getToken } from "@/lib/api";
 import Nav from "@/app/Nav";
-import ApprovalCard, { type Approval } from "./ApprovalCard";
+import ApprovalCard, {
+  type Approval,
+  type PortalActionSpec,
+} from "./ApprovalCard";
 
 export default function ApprovalsPage() {
   const router = useRouter();
   const [items, setItems] = useState<Approval[]>([]);
+  const [catalog, setCatalog] = useState<PortalActionSpec[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setItems(await apiFetch<Approval[]>("/approvals"));
+      const [list, cat] = await Promise.all([
+        apiFetch<Approval[]>("/approvals"),
+        apiFetch<PortalActionSpec[]>("/portal-actions"),
+      ]);
+      setItems(list);
+      setCatalog(cat);
       setSelected(new Set());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -92,6 +101,7 @@ export default function ApprovalsPage() {
           <ApprovalCard
             key={a.id}
             approval={a}
+            catalog={catalog}
             selected={selected.has(a.id)}
             onToggle={toggle}
             onChanged={load}

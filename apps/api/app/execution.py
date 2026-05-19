@@ -59,9 +59,22 @@ async def _execute_signature(
 async def _execute_portal_action(
     approval: Approval, client_id: uuid.UUID, db: AsyncSession
 ) -> str:
+    from app.portal_actions import get_action, missing_params
+
     payload = approval.payload or {}
     service = str(payload.get("service") or "")
     action = str(payload.get("action") or "")
+    spec = get_action(service, action)
+
+    # Validate the registry-known shape before touching the vault.
+    if spec is not None:
+        missing = missing_params(spec, payload.get("params"))
+        if missing:
+            return (
+                f"Approved, but cannot execute {spec.label}: missing "
+                f"required params: {', '.join(missing)}. Add them and retry."
+            )
+
     cred = await db.scalar(
         select(Credential).where(
             Credential.client_id == client_id, Credential.service == service
@@ -72,15 +85,17 @@ async def _execute_portal_action(
             f"Approved, but cannot execute: no credential on file for "
             f"'{service}'. Add it under Credentials vault and retry."
         )
+
     doc_type = f"portal_action:{service}:{action}"
     version = await _next_version(db, client_id, doc_type)
     db.add(Document(client_id=client_id, type=doc_type, version=version))
+    label = spec.label if spec is not None else f"'{action}' on '{service}'"
+    note = "" if spec is not None else " (action not in registry — free-form)"
     return (
-        f"Authenticated '{action}' on '{service}' prepared using the "
-        f"stored credential (vault id {cred.id}). Recorded in the "
-        f"Document Hub as {doc_type} (v{version}). The external portal "
-        f"call itself is performed by the integration layer "
-        f"(Playwright/HTTP, not yet wired)."
+        f"Authenticated {label}{note} prepared using the stored credential "
+        f"(vault id {cred.id}). Recorded in the Document Hub as {doc_type} "
+        f"(v{version}). The external portal call itself is performed by "
+        f"the integration layer (Playwright/HTTP, not yet wired)."
     )
 
 

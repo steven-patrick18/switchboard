@@ -11,6 +11,7 @@ from app.api.routes import (
     clients,
     credentials,
     intake,
+    portal_actions,
     tasks,
 )
 from app.config import settings
@@ -35,6 +36,7 @@ app.include_router(approvals.router)
 app.include_router(briefing.router)
 app.include_router(audit.router)
 app.include_router(credentials.router)
+app.include_router(portal_actions.router)
 
 
 @app.get("/health")
