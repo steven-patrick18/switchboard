@@ -127,6 +127,20 @@ export default function ClientDetailPage() {
     }
   }
 
+  async function uploadDocument(typeKey: string, file: File) {
+    const form = new FormData();
+    form.set("type", typeKey);
+    form.set("file", file);
+    await act(
+      () =>
+        apiFetch(`/clients/${id}/documents`, {
+          method: "POST",
+          body: form,
+        }),
+      `Uploaded ${file.name} as ${typeKey}.`,
+    );
+  }
+
   function saveIntake() {
     let parsed: unknown;
     try {
@@ -269,6 +283,31 @@ export default function ClientDetailPage() {
                     >
                       sample ↓
                     </button>
+                    <label
+                      className={
+                        "cursor-pointer rounded-md px-2 py-1 text-xs font-medium " +
+                        (d.provided
+                          ? "border border-slate-300 text-slate-600 hover:bg-slate-50"
+                          : "bg-slate-900 text-white hover:bg-slate-800")
+                      }
+                      title={
+                        d.provided
+                          ? "Replace the uploaded file"
+                          : "Upload a file for this document"
+                      }
+                    >
+                      {d.provided ? "replace ↑" : "+ upload"}
+                      <input
+                        type="file"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (f) uploadDocument(d.key, f);
+                        }}
+                      />
+                    </label>
                     <span
                       className={
                         d.provided
@@ -315,13 +354,35 @@ export default function ClientDetailPage() {
 
       {/* Documents */}
       <section className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Documents
-        </h2>
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Documents
+          </h2>
+          <label className="cursor-pointer rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
+            + Add document
+            <input
+              type="file"
+              className="hidden"
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (!f) return;
+                // Pre-fill the type input + focus it so the operator
+                // can name the new doc; the bulk form below handles
+                // the actual upload on submit.
+                setDocFile(f);
+                document.getElementById("doc-type-input")?.focus();
+              }}
+            />
+          </label>
+        </div>
         <p className="mt-1 text-xs text-slate-500">
-          Upload the actual file (PDF, image, scan). Storage is
-          content-addressed — uploading the same bytes twice de-dupes on
-          disk, and re-uploading a type bumps its version.
+          Mandated documents have their own + upload buttons in the
+          intake list above. Use the form below for ad-hoc uploads
+          (e.g., supporting attachments). Storage is content-addressed —
+          uploading the same bytes twice de-dupes on disk, and
+          re-uploading a type bumps its version.
         </p>
         <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
           {docs.length === 0 && (
@@ -395,6 +456,7 @@ export default function ClientDetailPage() {
           }}
         >
           <input
+            id="doc-type-input"
             className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
             placeholder="Document type (e.g. ein_letter)"
             value={docType}
