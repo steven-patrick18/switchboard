@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.tools import AUTO_TIERS, GATED_TIERS, Tool
+from app.agents.tools import AUTO_TIERS, GATED_TIERS, Tool, ToolContext
 from app.config import settings
 from app.models.agent_run import AgentRun
 from app.models.approval import DECISION_PENDING, Approval
@@ -61,11 +61,16 @@ async def run_agent(
     db: AsyncSession,
     task_id: uuid.UUID,
     instruction: str,
+    client_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
 ) -> RunResult:
     """Manual agentic loop. Every T2/T3 tool call is intercepted and lands
     in the approval queue instead of executing — the queue is the product."""
 
     model = spec.model or settings.agent_model
+    ctx = ToolContext(
+        db=db, client_id=client_id, project_id=project_id, task_id=task_id
+    )
     # Frozen system prompt → cache the prefix (tools + system).
     system = [
         {
@@ -118,6 +123,14 @@ async def run_agent(
                         "tool_use_id": block.id,
                         "content": f"Tool '{block.name}' is not permitted for this agent.",
                         "is_error": True,
+                    }
+                )
+            elif tool.tier in AUTO_TIERS and tool.db_runner is not None:
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": await tool.db_runner(dict(block.input), ctx),
                     }
                 )
             elif tool.tier in AUTO_TIERS and tool.runner is not None:

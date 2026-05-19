@@ -1,27 +1,51 @@
-from collections.abc import Callable
+import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.intake import evaluate as evaluate_intake
 from app.models.approval import (
     TIER_APPROVE,
     TIER_AUTO,
     TIER_AUTO_NOTIFY,
     TIER_SIGN_PAY,
 )
+from app.models.client_intake import ClientIntake
+from app.models.document import Document
+from app.models.task import Task
 
 AUTO_TIERS = {TIER_AUTO, TIER_AUTO_NOTIFY}
 GATED_TIERS = {TIER_APPROVE, TIER_SIGN_PAY}
 
 
 @dataclass(frozen=True)
+class ToolContext:
+    """Workspace context handed to db-aware tools so they can read/write
+    the client's records. Pure stateless tools never receive this."""
+
+    db: AsyncSession
+    client_id: uuid.UUID | None
+    project_id: uuid.UUID | None
+    task_id: uuid.UUID
+
+
+@dataclass(frozen=True)
 class Tool:
     """A scoped tool. T0/T1 run inline; T2/T3 are blocked behind the
-    approval queue and never execute until an operator approves."""
+    approval queue and never execute until an operator approves.
+
+    `runner` is a pure function of the args. `db_runner` is for
+    workspace-aware tools that read/write the client's records — it is
+    async and receives a ToolContext. A tool sets at most one."""
 
     name: str
     description: str
     input_schema: dict
     tier: str
     runner: Callable[[dict], str] | None = None
+    db_runner: Callable[[dict, ToolContext], Awaitable[str]] | None = None
 
     def to_anthropic(self) -> dict:
         return {
@@ -239,4 +263,100 @@ send_document_for_signature = Tool(
     },
     tier=TIER_SIGN_PAY,
     runner=None,
+)
+
+
+# --- Project Manager orchestration tools (workspace-aware) ---
+
+_ASSIGNABLE = {"compliance", "document"}
+
+
+async def _check_intake_status(_args: dict, ctx: ToolContext) -> str:
+    if ctx.client_id is None:
+        return "No client context available."
+    intake = await ctx.db.scalar(
+        select(ClientIntake).where(ClientIntake.client_id == ctx.client_id)
+    )
+    doc_types = set(
+        (
+            await ctx.db.scalars(
+                select(Document.type).where(Document.client_id == ctx.client_id)
+            )
+        ).all()
+    )
+    c = evaluate_intake(intake, doc_types)
+    if c.complete:
+        return "Client intake is COMPLETE — all required data and documents captured."
+    return (
+        "Client intake is INCOMPLETE. Missing fields: "
+        + (", ".join(c.missing_fields) or "none")
+        + ". Missing documents: "
+        + (", ".join(c.missing_documents) or "none")
+        + ". Blocked steps cannot start until these are captured."
+    )
+
+
+check_intake_status = Tool(
+    name="check_intake_status",
+    description=(
+        "Read the client's capture-once intake status: whether every "
+        "required datum and document is captured, and what is missing. "
+        "Read-only. Use this before planning to find blockers."
+    ),
+    input_schema={"type": "object", "properties": {}},
+    tier=TIER_AUTO,
+    db_runner=_check_intake_status,
+)
+
+
+async def _assign_task(args: dict, ctx: ToolContext) -> str:
+    agent = str(args.get("agent", "")).strip().lower()
+    objective = str(args.get("objective", "")).strip()
+    if agent not in _ASSIGNABLE:
+        return (
+            f"Cannot assign to '{agent}'. Valid targets: "
+            f"{', '.join(sorted(_ASSIGNABLE))}."
+        )
+    if not objective:
+        return "An objective is required to assign a task."
+    if ctx.project_id is None:
+        return "No project context; cannot assign a task."
+    task = Task(
+        project_id=ctx.project_id,
+        agent=agent,
+        status="queued",
+        input={"objective": objective, "assigned_by": "pm"},
+    )
+    ctx.db.add(task)
+    await ctx.db.flush()
+    return (
+        f"Assigned {agent} a queued task ({task.id}): {objective}. It will "
+        f"run later through its own scoped tools and approval gateway."
+    )
+
+
+assign_task = Tool(
+    name="assign_task",
+    description=(
+        "Delegate a launch step by creating a queued task for another "
+        "agent (compliance or document). Tier-1: internal orchestration "
+        "only — it queues work, it does NOT execute it or take any "
+        "external/regulated action."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "agent": {
+                "type": "string",
+                "description": "Target agent: 'compliance' or 'document'.",
+            },
+            "objective": {
+                "type": "string",
+                "description": "What that agent should accomplish.",
+            },
+        },
+        "required": ["agent", "objective"],
+    },
+    tier=TIER_AUTO_NOTIFY,
+    db_runner=_assign_task,
 )

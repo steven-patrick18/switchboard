@@ -76,6 +76,8 @@ async def run(
         db=db,
         task_id=task_id,
         instruction=body.instruction,
+        client_id=client_row.id,
+        project_id=project.id,
     )
 
     task.status = "awaiting_approval" if result.approval_ids else "completed"
