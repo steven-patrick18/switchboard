@@ -32,6 +32,14 @@ Stack: Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.x (async) · Alembi
 Config is read from the repo-root `.env` (see `.env.example`). The default
 `DATABASE_URL` matches the Docker Compose Postgres credentials.
 
+## Client intake (capture-once)
+
+Every datum and document the whole launch needs is captured at onboarding
+via `/clients/{id}/intake` (+ `/documents`). A client cannot be submitted
+until every required field and mandated document is present, so the client
+is never re-disturbed mid-process. `app/intake.py` is the single source of
+truth that agents read to auto-fill filings (form-field memory).
+
 ## Agents
 
 `app/agents/` holds the Claude Agent runtime. Phase 1: the Compliance
