@@ -6,6 +6,7 @@ import Link from "next/link";
 import { clearToken } from "@/lib/api";
 
 const LINKS = [
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/workspaces", label: "Workspaces" },
   { href: "/approvals", label: "Approval queue" },
 ];

@@ -29,7 +29,7 @@ export default function LoginPage() {
         body: JSON.stringify(body),
       });
       setToken(res.access_token);
-      router.push("/workspaces");
+      router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
