@@ -122,3 +122,121 @@ queue_filing_submission = Tool(
     tier=TIER_SIGN_PAY,
     runner=None,
 )
+
+
+# --- Project Manager Agent tools (T0) ---
+
+_VOIP_LAUNCH_PLAYBOOK = (
+    "Codified US VoIP launch (v1):\n"
+    "1. Entity & identity — confirm legal entity, EIN, officers, principal "
+    "address (from client intake).\n"
+    "2. FCC layer — Form 499-A/Q filer registration, RMD entry, "
+    "STIR/SHAKEN token via STI-PA, Section 214 if international.\n"
+    "3. State layer — CPCN/registration in each target state.\n"
+    "4. Carrier onboarding — wholesale applications, credit/KYC, MSAs, "
+    "deposits with 1-3 carriers.\n"
+    "5. Go-live — number provisioning, test calls, monitoring.\n"
+    "6. Ongoing — 499-Q quarterly, CPNI, USF, annual filings.\n"
+    "Owners: Compliance owns 2-3; Document owns MSAs/LOAs/ToS/AUP; the "
+    "operator owns deposits, signatures, and carrier calls."
+)
+
+
+def _get_voip_launch_playbook(_args: dict) -> str:
+    return _VOIP_LAUNCH_PLAYBOOK
+
+
+get_voip_launch_playbook = Tool(
+    name="get_voip_launch_playbook",
+    description=(
+        "Return the codified, phased US VoIP launch checklist used to "
+        "decompose a launch into sequenced, owner-assigned steps. Read-only."
+    ),
+    input_schema={"type": "object", "properties": {}},
+    tier=TIER_AUTO,
+    runner=_get_voip_launch_playbook,
+)
+
+
+# --- Document Agent tools ---
+
+_DOC_TEMPLATES = {
+    "tos": (
+        "Terms of Service outline: parties; service description; acceptable "
+        "use ref; fees/billing; SLAs; limitation of liability; indemnity; "
+        "termination; governing law; CPNI/privacy ref."
+    ),
+    "aup": (
+        "Acceptable Use Policy outline: prohibited traffic (robocalls, "
+        "spoofing, fraud); STIR/SHAKEN attestation duties; traffic-pumping "
+        "ban; suspension rights; reporting obligations."
+    ),
+    "loa": (
+        "Letter of Authorization outline: authorizing entity, authorized "
+        "party, scope (number port / carrier provisioning), effective "
+        "dates, officer signature block."
+    ),
+    "msa_review": (
+        "Carrier MSA review checklist: term/renewal, deposit & true-up, "
+        "rate change notice, MOU commit/shortfall, traffic quality / "
+        "blocking, indemnity, termination & data return — flag any "
+        "one-sided clause for the operator."
+    ),
+}
+
+
+def _lookup_document_template(args: dict) -> str:
+    key = str(args.get("doc_type", "")).strip().lower()
+    return _DOC_TEMPLATES.get(
+        key,
+        "No cached template. Supported: tos, aup, loa, msa_review. Draft "
+        "conservatively and flag novel clauses for operator review.",
+    )
+
+
+lookup_document_template = Tool(
+    name="lookup_document_template",
+    description=(
+        "Return a cached outline/checklist for a legal document type "
+        "(tos, aup, loa, msa_review). Read-only."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "doc_type": {
+                "type": "string",
+                "description": "One of: tos, aup, loa, msa_review.",
+            }
+        },
+        "required": ["doc_type"],
+    },
+    tier=TIER_AUTO,
+    runner=_lookup_document_template,
+)
+
+
+send_document_for_signature = Tool(
+    name="send_document_for_signature",
+    description=(
+        "Send a drafted document to a client or carrier for e-signature. "
+        "Tier-3: queued for operator approval and does NOT send until a "
+        "human signs off."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "doc_type": {"type": "string", "description": "e.g. 'LOA', 'MSA'."},
+            "recipient": {
+                "type": "string",
+                "description": "Signer email / party.",
+            },
+            "summary": {
+                "type": "string",
+                "description": "What is being sent and why.",
+            },
+        },
+        "required": ["doc_type", "recipient", "summary"],
+    },
+    tier=TIER_SIGN_PAY,
+    runner=None,
+)

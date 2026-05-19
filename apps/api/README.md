@@ -42,11 +42,14 @@ truth that agents read to auto-fill filings (form-field memory).
 
 ## Agents
 
-`app/agents/` holds the Claude Agent runtime. Phase 1: the Compliance
-Agent. Every tool is tier-classified — T0/T1 run inline, **T2/T3 are
-intercepted and queued to the approval table; they never execute until an
-operator approves**. Run it via `POST /agents/compliance/run`
-(`{client_id, instruction}`), which needs `ANTHROPIC_API_KEY` set.
+`app/agents/` holds the Claude Agent runtime. Phase 1 roster (registry in
+`app/agents/registry.py`): **pm** (Project Manager — decomposes a launch
+against the codified playbook), **compliance** (FCC/RMD/STIR-SHAKEN/CPCN),
+**document** (ToS/AUP/LOA/MSA review). Every tool is tier-classified —
+T0/T1 run inline, **T2/T3 are intercepted and queued to the approval
+table; they never execute until an operator approves**. `GET /agents`
+lists them; `POST /agents/{agent}/run` (`{client_id, instruction}`) runs
+one — needs `ANTHROPIC_API_KEY` set.
 
 ## Tests
 
