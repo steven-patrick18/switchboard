@@ -2,7 +2,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.routes import agents, approvals, auth, clients, intake, tasks
+from app.api.routes import (
+    agents,
+    approvals,
+    auth,
+    briefing,
+    clients,
+    intake,
+    tasks,
+)
 from app.config import settings
 from app.db import engine
 
@@ -22,6 +30,7 @@ app.include_router(intake.router)
 app.include_router(tasks.router)
 app.include_router(agents.router)
 app.include_router(approvals.router)
+app.include_router(briefing.router)
 
 
 @app.get("/health")
