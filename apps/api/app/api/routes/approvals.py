@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.audit import record_audit
 from app.db import get_db
 from app.execution import execute_approval
 from app.models import Approval, Client, Project, Task, User
@@ -107,6 +108,7 @@ async def approve(
 ) -> ApprovalOut:
     approval, client = await _load_owned(approval_id, user, db)
     _require_pending(approval)
+    before_payload = approval.payload
     if body.payload_override is not None:
         approval.payload = body.payload_override
         approval.decision = DECISION_EDITED
@@ -115,8 +117,31 @@ async def approve(
     approval.reviewer_id = user.id
     approval.note = body.note
     approval.ts = datetime.now(UTC)
+    await record_audit(
+        db,
+        actor=user.email,
+        action=f"approval.{approval.decision}",
+        subject=f"approval:{approval.id}",
+        client_id=client.id,
+        before={"payload": before_payload}
+        if approval.decision == DECISION_EDITED
+        else None,
+        after={
+            "decision": approval.decision,
+            "payload": approval.payload,
+            "note": approval.note,
+        },
+    )
     approval.execution_result = await execute_approval(approval, client.id, db)
     approval.executed_at = datetime.now(UTC)
+    await record_audit(
+        db,
+        actor="system",
+        action="approval.executed",
+        subject=f"approval:{approval.id}",
+        client_id=client.id,
+        after={"result": approval.execution_result},
+    )
     await db.commit()
     return _out(approval, client)
 
@@ -134,6 +159,14 @@ async def reject(
     approval.reviewer_id = user.id
     approval.note = body.reason
     approval.ts = datetime.now(UTC)
+    await record_audit(
+        db,
+        actor=user.email,
+        action="approval.rejected",
+        subject=f"approval:{approval.id}",
+        client_id=client.id,
+        after={"decision": DECISION_REJECTED, "note": body.reason},
+    )
     await db.commit()
     return _out(approval, client)
 
@@ -160,11 +193,27 @@ async def batch(
         approval.reviewer_id = user.id
         approval.note = body.note
         approval.ts = datetime.now(UTC)
+        await record_audit(
+            db,
+            actor=user.email,
+            action=f"approval.{body.decision}",
+            subject=f"approval:{approval.id}",
+            client_id=row[1].id,
+            after={"decision": body.decision, "note": body.note},
+        )
         if body.decision == DECISION_APPROVED:
             approval.execution_result = await execute_approval(
                 approval, row[1].id, db
             )
             approval.executed_at = datetime.now(UTC)
+            await record_audit(
+                db,
+                actor="system",
+                action="approval.executed",
+                subject=f"approval:{approval.id}",
+                client_id=row[1].id,
+                after={"result": approval.execution_result},
+            )
         updated.append(aid)
     await db.commit()
     return BatchResult(updated=updated, skipped=skipped)

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools import AUTO_TIERS, GATED_TIERS, Tool, ToolContext
+from app.audit import record_audit
 from app.config import settings
 from app.models.agent_run import AgentRun
 from app.models.approval import DECISION_PENDING, Approval
@@ -152,6 +153,14 @@ async def run_agent(
                 db.add(approval)
                 await db.flush()
                 result.approval_ids.append(approval.id)
+                await record_audit(
+                    db,
+                    actor=spec.name,
+                    action="approval.queued",
+                    subject=f"approval:{approval.id}",
+                    client_id=client_id,
+                    after={"tier": tool.tier, "payload": dict(block.input)},
+                )
                 tool_results.append(
                     {
                         "type": "tool_result",

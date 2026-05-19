@@ -1,5 +1,6 @@
 from app.models.agent_run import AgentRun
 from app.models.approval import Approval
+from app.models.audit_log import AuditLog
 from app.models.client import Client
 from app.models.client_intake import ClientIntake
 from app.models.document import Document
@@ -10,6 +11,7 @@ from app.models.user import User
 __all__ = [
     "AgentRun",
     "Approval",
+    "AuditLog",
     "Client",
     "ClientIntake",
     "Document",

@@ -32,6 +32,13 @@ type Task = {
   input: Record<string, unknown> | null;
 };
 type ClientMeta = { id: string; name: string; stage: string };
+type Audit = {
+  id: string;
+  ts: string;
+  actor: string;
+  action: string;
+  subject: string;
+};
 
 const AGENTS = ["pm", "compliance", "document"];
 
@@ -43,6 +50,7 @@ export default function ClientDetailPage() {
   const [intake, setIntake] = useState<IntakeStatus | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [audit, setAudit] = useState<Audit[]>([]);
   const [intakeText, setIntakeText] = useState("{}");
   const [docType, setDocType] = useState("");
   const [agent, setAgent] = useState("compliance");
@@ -52,17 +60,19 @@ export default function ClientDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [clients, st, d, t] = await Promise.all([
+      const [clients, st, d, t, au] = await Promise.all([
         apiFetch<ClientMeta[]>("/clients"),
         apiFetch<IntakeStatus>(`/clients/${id}/intake`),
         apiFetch<Doc[]>(`/clients/${id}/documents`),
         apiFetch<Task[]>(`/clients/${id}/tasks`),
+        apiFetch<Audit[]>(`/clients/${id}/audit`),
       ]);
       setMeta(clients.find((c) => c.id === id) ?? null);
       setIntake(st);
       setIntakeText(JSON.stringify(st.intake ?? {}, null, 2));
       setDocs(d);
       setTasks(t);
+      setAudit(au);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to load");
     }
@@ -366,6 +376,32 @@ export default function ClientDetailPage() {
                     Run
                   </button>
                 )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Audit trail */}
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Audit trail
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Immutable, append-only — every queued / decided / executed action.
+        </p>
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+          {audit.length === 0 && (
+            <li className="p-3 text-sm text-slate-500">No audit entries.</li>
+          )}
+          {audit.map((e) => (
+            <li key={e.id} className="flex justify-between gap-3 p-3 text-sm">
+              <span>
+                <span className="font-mono text-xs">{e.action}</span>{" "}
+                <span className="text-slate-500">by {e.actor}</span>
+              </span>
+              <span className="whitespace-nowrap text-xs text-slate-400">
+                {new Date(e.ts).toLocaleString()}
               </span>
             </li>
           ))}

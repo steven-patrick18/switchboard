@@ -5,6 +5,7 @@ from sqlalchemy import text
 from app.api.routes import (
     agents,
     approvals,
+    audit,
     auth,
     briefing,
     clients,
@@ -31,6 +32,7 @@ app.include_router(tasks.router)
 app.include_router(agents.router)
 app.include_router(approvals.router)
 app.include_router(briefing.router)
+app.include_router(audit.router)
 
 
 @app.get("/health")
