@@ -1,4 +1,8 @@
+import csv
+import io
+import json
 import uuid
+import zipfile
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -11,7 +15,7 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.doc_samples import build_request_pack_pdf, get_sample
 from app.intake import evaluate, resolve_required_documents
-from app.models import Client, ClientIntake, Document, User
+from app.models import AuditLog, Client, ClientIntake, Document, User
 from app.schemas.intake import (
     CompletenessOut,
     DocumentOut,
@@ -170,6 +174,101 @@ async def upload_document(
     await db.commit()
     await db.refresh(doc)
     return doc
+
+
+@router.get("/documents.zip")
+async def export_client_zip(
+    client_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Archive bundle of everything captured for one client: every
+    uploaded document (latest version of each type) plus intake.json
+    and audit.csv. Useful for handoff or compliance archiving."""
+    client = await _owned_client(client_id, user, db)
+    intake = await db.scalar(
+        select(ClientIntake).where(ClientIntake.client_id == client_id)
+    )
+    docs = list(
+        (
+            await db.scalars(
+                select(Document)
+                .where(
+                    Document.client_id == client_id,
+                    Document.s3_key.is_not(None),
+                )
+                .order_by(Document.type, Document.version.desc())
+            )
+        ).all()
+    )
+    audit = list(
+        (
+            await db.scalars(
+                select(AuditLog)
+                .where(AuditLog.client_id == client_id)
+                .order_by(AuditLog.ts.asc())
+            )
+        ).all()
+    )
+
+    buf = io.BytesIO()
+    seen_types: set[str] = set()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # Intake snapshot — always present so the archive's structure
+        # is predictable, even when the operator hasn't started intake.
+        intake_obj = (
+            {
+                col.name: getattr(intake, col.name)
+                for col in intake.__table__.columns
+            }
+            if intake is not None
+            else None
+        )
+        zf.writestr(
+            "intake.json",
+            json.dumps(intake_obj, indent=2, default=str),
+        )
+        # Audit CSV (full trail).
+        audit_buf = io.StringIO()
+        w = csv.writer(audit_buf, lineterminator="\n")
+        w.writerow(
+            ("ts", "actor", "action", "subject", "before", "after")
+        )
+        for r in audit:
+            w.writerow(
+                (
+                    r.ts.isoformat() if r.ts else "",
+                    r.actor,
+                    r.action,
+                    r.subject,
+                    json.dumps(r.before, separators=(",", ":")) if r.before else "",
+                    json.dumps(r.after, separators=(",", ":")) if r.after else "",
+                )
+            )
+        zf.writestr("audit.csv", audit_buf.getvalue())
+        # Latest version of each document type only — older versions are
+        # in the version history; the archive carries the canonical set.
+        for d in docs:
+            if d.type in seen_types:
+                continue
+            seen_types.add(d.type)
+            try:
+                data = storage.read_bytes(d.s3_key)  # type: ignore[arg-type]
+            except FileNotFoundError:
+                continue
+            name = d.filename or f"{d.type}-v{d.version}"
+            zf.writestr(f"documents/{d.type}/{name}", data)
+
+    safe = "".join(
+        ch if ch.isalnum() or ch in "-_" else "-" for ch in client.name
+    ).strip("-") or "client"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe}-archive.zip"'
+        },
+    )
 
 
 @router.get("/documents/{doc_id}/download")

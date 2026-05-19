@@ -457,12 +457,28 @@ export default function ClientDetailPage() {
             </p>
           )}
         </div>
-        <Link
-          href="/approvals"
-          className="text-sm text-slate-600 hover:text-slate-900 hover:underline"
-        >
-          Approval queue →
-        </Link>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() =>
+              downloadFile(
+                `/clients/${id}/documents.zip`,
+                `${meta?.name ?? "client"}-archive.zip`,
+              ).catch((e) =>
+                setMsg(e instanceof Error ? e.message : "Archive failed"),
+              )
+            }
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+            title="Download intake + audit + every uploaded document as a zip"
+          >
+            Archive ↓
+          </button>
+          <Link
+            href="/approvals"
+            className="text-sm text-slate-600 hover:text-slate-900 hover:underline"
+          >
+            Approval queue →
+          </Link>
+        </div>
       </div>
 
       {msg && (

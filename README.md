@@ -18,7 +18,8 @@ End-to-end, all operator-scoped and audited:
 - **Agent roster** — `pm` (orchestrates: reads intake, delegates sub-tasks), `compliance`, `document`. Manual Claude tool-use loop with a **tier-gated approval boundary**: T0/T1 run inline; T2/T3 are queued and never execute until a human approves. Per-service portal-action catalog + adapter pattern (demo backend wired today; Playwright/HTTP integrations slot in).
 - **Approval queue** — review / edit&approve / reject / batch with always-visible operator note. Rejection requires a non-blank reason at the schema level so the audit trail always explains why something didn't happen. A live **pending-approval badge in the sidebar** keeps the operator aware from any page.
 - **Task running** — run a queued sub-task, or a bounded bulk sweep of all queued tasks.
-- **Immutable audit trail** + **CSV export** (per-client and operator-wide) + a deterministic operator **daily briefing**.
+- **Immutable audit trail** + **CSV export** (per-client and operator-wide) + a deterministic operator **daily briefing** + **per-client archive zip** (intake.json + audit.csv + latest version of every uploaded document) for handoff or compliance archiving.
+- **Best-effort SMTP notifications**: configure `SMTP_*` env vars and the platform emails the owning operator the moment an agent queues a tier-2/3 approval. Empty config = email disabled; SMTP failures never block the agent loop.
 - **Web UI** with a professional desktop layout (fixed left sidebar, `max-w-7xl` content): `/dashboard`, `/workspaces`, `/clients/[id]`, `/approvals`, `/history`, `/settings`.
 
 ## Monorepo layout

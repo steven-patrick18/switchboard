@@ -2,9 +2,13 @@
 the same bytes produce the same SHA-256 (= s3_key) and share one on-disk
 file. Owner-scoped reads — another operator can't download from someone
 else's workspace. Intake completeness ignores metadata-only Documents.
+The /documents.zip archive bundles intake + audit + the latest uploaded
+version of every document type.
 """
 
+import io
 import uuid
+import zipfile
 from pathlib import Path
 
 import pytest_asyncio
@@ -175,3 +179,59 @@ async def test_metadata_only_document_does_not_satisfy_intake(
     # confirm the row didn't accidentally flip anything to provided.
     for d in req.values():
         assert d["provided"] is False
+
+
+async def test_client_archive_zip_export(client: AsyncClient):
+    """The /documents.zip endpoint bundles intake + audit + only the
+    LATEST uploaded version of each document type."""
+    h = await _register(client)
+    cid = (
+        await client.post("/clients", headers=h, json={"name": "Acme"})
+    ).json()["id"]
+    # Upload v1, then v2 of the same type — the archive must carry only v2.
+    await client.post(
+        f"/clients/{cid}/documents",
+        headers=h,
+        data={"type": "ein_letter"},
+        files={"file": ("ein-v1.pdf", b"version-one", "application/pdf")},
+    )
+    await client.post(
+        f"/clients/{cid}/documents",
+        headers=h,
+        data={"type": "ein_letter"},
+        files={"file": ("ein-v2.pdf", b"version-two", "application/pdf")},
+    )
+    # A second document type (one version).
+    await client.post(
+        f"/clients/{cid}/documents",
+        headers=h,
+        data={"type": "ssn_card"},
+        files={"file": ("ssn.pdf", b"ssn-bytes", "application/pdf")},
+    )
+
+    r = await client.get(f"/clients/{cid}/documents.zip", headers=h)
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    assert "Acme-archive.zip" in r.headers["content-disposition"]
+
+    z = zipfile.ZipFile(io.BytesIO(r.content))
+    names = set(z.namelist())
+    assert "intake.json" in names
+    assert "audit.csv" in names
+    # Latest of each type only.
+    assert "documents/ein_letter/ein-v2.pdf" in names
+    assert "documents/ein_letter/ein-v1.pdf" not in names
+    assert "documents/ssn_card/ssn.pdf" in names
+    # Bytes round-trip.
+    assert z.read("documents/ein_letter/ein-v2.pdf") == b"version-two"
+    assert z.read("documents/ssn_card/ssn.pdf") == b"ssn-bytes"
+
+
+async def test_archive_zip_404_for_other_operator(client: AsyncClient):
+    ha = await _register(client, "a@example.com")
+    cid = (
+        await client.post("/clients", headers=ha, json={"name": "A"})
+    ).json()["id"]
+    hb = await _register(client, "b@example.com")
+    r = await client.get(f"/clients/{cid}/documents.zip", headers=hb)
+    assert r.status_code == 404
