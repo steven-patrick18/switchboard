@@ -34,6 +34,11 @@ class SendEmailBody(BaseModel):
     subject: str | None = Field(default=None, max_length=255)
     body: str | None = Field(default=None, max_length=20000)
     cc: list[str] | None = Field(default=None, max_length=20)
+    # 'client' (default) uses the per-client email credential — the From
+    # line is the client, which is what regulators expect for chain-of-
+    # custody. 'platform' uses the operator's own SMTP — only useful
+    # for internal mail (test sends, internal forwarding).
+    via: Literal["client", "platform"] = "client"
 
 
 class SendEmailResult(BaseModel):

@@ -83,10 +83,12 @@ async def send_email_now(
     body: str,
     cc: list[str] | None = None,
 ) -> tuple[bool, str | None, str | None]:
-    """Synchronous send that returns (ok, message_id, error_text). Used
-    by the operator's manual 'Send via email' click — they want to know
-    immediately whether it went out, so failures are surfaced (unlike
-    send_email which swallows them by design)."""
+    """Synchronous send via the PLATFORM SMTP (operator-level). Used for
+    internal Switchboard mail — approval-queue alerts to the operator,
+    self-tests, etc. Returns (ok, message_id, error_text).
+
+    For outbound filings to NECA/FCC/etc the From line must be the
+    CLIENT, not Switchboard — use send_via_client_smtp instead."""
     cfg = await _load_config(db)
     if not cfg.enabled:
         return False, None, "SMTP not configured (set host + from in Settings)."
@@ -95,6 +97,95 @@ async def send_email_now(
         return True, mid or None, None
     except Exception as exc:  # noqa: BLE001 — boundary: external SMTP
         return False, None, f"{exc.__class__.__name__}: {exc}"
+
+
+def _send_via_client_sync(
+    *,
+    from_address: str,
+    password: str,
+    host: str,
+    port: int,
+    use_tls: bool,
+    to: str,
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+) -> str:
+    """Open the CLIENT's SMTP server and send. Port 465 uses implicit
+    SSL; everything else uses STARTTLS. Returns the Message-ID so the
+    Approval row can record it for later inbound-reply matching."""
+    import ssl  # noqa: PLC0415
+
+    msg = EmailMessage()
+    msg["From"] = from_address
+    msg["To"] = to
+    if cc:
+        msg["Cc"] = ", ".join(cc)
+    msg["Subject"] = subject
+    msg.set_content(body)
+    if port == 465 and not use_tls:
+        # Implicit SSL — connect with SMTP_SSL.
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(host, port, context=ctx) as s:
+            s.login(from_address, password)
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port or 587) as s:
+            if use_tls:
+                s.starttls()
+            s.login(from_address, password)
+            s.send_message(msg)
+    return msg.get("Message-ID") or ""
+
+
+async def send_via_client_smtp(
+    db: AsyncSession,
+    *,
+    client_id,
+    actor: str,
+    to: str,
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+) -> tuple[bool, str | None, str | None]:
+    """Send a filing email FROM THE CLIENT's address using their stored
+    `client_email` credential. Returns (sent, message_id, error_text).
+
+    If no client email credential is on file, returns (False, None,
+    'No client email credential on file...') so the UI can prompt the
+    operator to add one. We do NOT silently fall back to platform
+    SMTP — that would put Switchboard on the From line of a regulated
+    filing, which is wrong for chain-of-custody."""
+    from app.vault import get_client_email_credential  # noqa: PLC0415
+
+    resolved = await get_client_email_credential(db, client_id, actor=actor)
+    if resolved is None:
+        return False, None, (
+            "No client email credential on file. Add a 'client_email' "
+            "credential in the client's vault (username = client email "
+            "address, secret = SMTP / app password). Filings are sent "
+            "FROM the client, not from Switchboard."
+        )
+    from_address, password, host, port, use_tls = resolved
+    try:
+        mid = await asyncio.to_thread(
+            _send_via_client_sync,
+            from_address=from_address,
+            password=password,
+            host=host,
+            port=port,
+            use_tls=use_tls,
+            to=to,
+            subject=subject,
+            body=body,
+            cc=cc,
+        )
+        return True, mid or None, None
+    except Exception as exc:  # noqa: BLE001 — external SMTP boundary
+        return False, None, (
+            f"SMTP send to {host}:{port} failed — "
+            f"{exc.__class__.__name__}: {exc}"
+        )
 
 
 async def send_email(

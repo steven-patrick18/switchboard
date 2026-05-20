@@ -137,6 +137,113 @@ async def use_credential(
     return decrypt(cred.secret_ciphertext)
 
 
+# --- Client email / SMTP resolution --------------------------------
+# The client_email credential is the per-client email login (Gmail
+# app password, Outlook app password, custom-domain SMTP) the
+# platform uses to send filings to NECA / FCC / state PUCs ON
+# BEHALF of the client. Filings must originate from the client's
+# address (not Switchboard's) for chain-of-custody — regulators
+# reply to whoever sent the mail, so the client must be on the From
+# line.
+_CLIENT_EMAIL_SERVICES = ("client_email", "email", "smtp")
+
+# Common provider SMTP defaults — used when the operator stores the
+# credential without filling in the url field. Maps email domain →
+# (host, port, use_tls).
+_SMTP_PROVIDER_DEFAULTS = {
+    "gmail.com": ("smtp.gmail.com", 587, True),
+    "googlemail.com": ("smtp.gmail.com", 587, True),
+    "outlook.com": ("smtp-mail.outlook.com", 587, True),
+    "hotmail.com": ("smtp-mail.outlook.com", 587, True),
+    "live.com": ("smtp-mail.outlook.com", 587, True),
+    "icloud.com": ("smtp.mail.me.com", 587, True),
+    "me.com": ("smtp.mail.me.com", 587, True),
+    "mac.com": ("smtp.mail.me.com", 587, True),
+    "yahoo.com": ("smtp.mail.yahoo.com", 587, True),
+    "aol.com": ("smtp.aol.com", 587, True),
+    "zoho.com": ("smtp.zoho.com", 587, True),
+    "fastmail.com": ("smtp.fastmail.com", 587, True),
+    "protonmail.com": ("smtp.protonmail.com", 587, True),
+}
+
+
+def _parse_smtp_url(raw: str | None) -> tuple[str, int, bool] | None:
+    """Parse stored URL field into (host, port, use_tls). Accepts:
+      - 'smtp.gmail.com'                     -> ('smtp.gmail.com', 587, True)
+      - 'smtp.gmail.com:465'                 -> ('smtp.gmail.com', 465, False)
+      - 'smtps://smtp.gmail.com:465'         -> ('smtp.gmail.com', 465, False)
+      - 'smtp://smtp.mail.example.com:587'   -> ('smtp.mail.example.com', 587, True)
+    Returns None if the input doesn't look like an SMTP host."""
+    if not raw:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    use_tls = True
+    if s.startswith("smtps://"):
+        s = s[len("smtps://"):]
+        use_tls = False  # implicit TLS on port 465; we wrap with SSL
+    elif s.startswith("smtp://"):
+        s = s[len("smtp://"):]
+    # strip path / query if user pasted a full URL by mistake
+    s = s.split("/", 1)[0]
+    if ":" in s:
+        host, _, port_s = s.partition(":")
+        try:
+            port = int(port_s)
+        except ValueError:
+            return None
+        # Port 465 is implicit-SSL; everything else assume STARTTLS.
+        if port == 465:
+            use_tls = False
+        return host, port, use_tls
+    return s, 587, True
+
+
+def _infer_smtp_from_email(email: str) -> tuple[str, int, bool] | None:
+    if "@" not in email:
+        return None
+    domain = email.split("@", 1)[1].lower().strip()
+    return _SMTP_PROVIDER_DEFAULTS.get(domain)
+
+
+async def get_client_email_credential(
+    db: AsyncSession, client_id: uuid.UUID, *, actor: str
+) -> tuple[str, str, str, int, bool] | None:
+    """Resolve the client's email login for sending filings.
+
+    Returns (from_address, password, host, port, use_tls) or None.
+
+    Looks up the first credential whose service is one of the known
+    aliases ('client_email', 'email', 'smtp'). The credential's `url`
+    field can carry the SMTP host explicitly; if blank we infer from
+    the email domain. Decrypts via the audited `use_credential` path
+    so every send leaves a forensic record."""
+    cred = None
+    for svc in _CLIENT_EMAIL_SERVICES:
+        cred = await db.scalar(
+            select(Credential).where(
+                Credential.client_id == client_id, Credential.service == svc
+            )
+        )
+        if cred is not None:
+            break
+    if cred is None or is_expired(cred) or not cred.username:
+        return None
+    smtp = _parse_smtp_url(cred.url) or _infer_smtp_from_email(cred.username)
+    if smtp is None:
+        return None
+    secret = await use_credential(
+        db,
+        client_id=client_id,
+        service=cred.service,
+        actor=actor,
+        purpose="outbound_filing_email",
+    )
+    host, port, use_tls = smtp
+    return cred.username, secret, host, port, use_tls
+
+
 async def credential_availability(
     db: AsyncSession,
     client_id: uuid.UUID,

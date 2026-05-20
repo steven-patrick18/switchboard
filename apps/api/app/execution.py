@@ -31,25 +31,42 @@ async def _next_version(db: AsyncSession, client_id: uuid.UUID, doc_type: str) -
 
 async def _intake_for(
     db: AsyncSession, client_id: uuid.UUID
-) -> tuple[str | None, str | None]:
-    """Legal name + EIN for the email packet header. Returns (None, None)
-    if no intake row yet — the packet builder substitutes [TBD]."""
+) -> tuple[str | None, str | None, str | None]:
+    """(legal_name, ein, officer_email) for the email packet header.
+    The officer_email is used as the From line if a stored
+    client_email credential isn't on file yet."""
     intake = await db.scalar(
         select(ClientIntake).where(ClientIntake.client_id == client_id)
     )
     if intake is None:
-        return None, None
-    return intake.legal_name, intake.ein
+        return None, None, None
+    return intake.legal_name, intake.ein, intake.officer_email
 
 
-async def _platform_from_address(db: AsyncSession) -> str:
-    """Use the operator's configured SMTP-from as the 'From' line. Falls
-    back to a Switchboard-branded placeholder so the packet still
-    renders if SMTP isn't set up yet."""
-    from app import platform_config  # noqa: PLC0415
+async def _client_from_address(db: AsyncSession, client_id: uuid.UUID) -> str:
+    """The From line for an outbound filing — must be the CLIENT, not
+    Switchboard. Resolution order:
+      1. The username on the stored client_email/email/smtp credential
+         (this is what the SMTP login will actually use)
+      2. The officer_email on the client's intake
+      3. A clear placeholder so the operator knows to add a credential
+    """
+    from app.models.credential import Credential  # noqa: PLC0415
 
-    sender = await platform_config.smtp_from(db)
-    return sender or "[operator email — set SMTP_FROM in Settings]"
+    for svc in ("client_email", "email", "smtp"):
+        cred = await db.scalar(
+            select(Credential).where(
+                Credential.client_id == client_id, Credential.service == svc
+            )
+        )
+        if cred is not None and cred.username:
+            return cred.username
+    intake = await db.scalar(
+        select(ClientIntake).where(ClientIntake.client_id == client_id)
+    )
+    if intake is not None and intake.officer_email:
+        return intake.officer_email
+    return "[client email — add a 'client_email' credential in the vault]"
 
 
 async def _execute_filing(
@@ -64,8 +81,11 @@ async def _execute_filing(
     approval.result_document_id = doc.id
     # Build the prefilled email packet so the operator can one-click
     # send (or copy-paste) the filing to NECA / USAC / state PUC.
-    legal_name, ein = await _intake_for(db, client_id)
-    from_address = await _platform_from_address(db)
+    # IMPORTANT: From line is the CLIENT, not Switchboard — regulators
+    # expect chain-of-custody. The SMTP login itself uses the client's
+    # stored credential at send time.
+    legal_name, ein, _ = await _intake_for(db, client_id)
+    from_address = await _client_from_address(db, client_id)
     approval.email_packet = build_email_packet(
         form=form,
         payload=payload,
@@ -95,8 +115,8 @@ async def _execute_signature(
     approval.result_document_id = doc.id
     # Even before Documenso integration is wired, give the operator a
     # ready-to-send email so they can dispatch the doc out-of-band.
-    legal_name, ein = await _intake_for(db, client_id)
-    from_address = await _platform_from_address(db)
+    legal_name, ein, _ = await _intake_for(db, client_id)
+    from_address = await _client_from_address(db, client_id)
     body = (
         f"Please find attached: {doc_type} for {legal_name or '[client]'} "
         f"({ein or 'EIN TBD'}).\n\nReply with your signature or use the "

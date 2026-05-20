@@ -289,9 +289,18 @@ export default function ApprovalCard({
                 )}
               </div>
               <p className="mt-1 text-xs text-slate-500">
-                The platform pre-filled the email this filing should go
-                to. One-click Send if SMTP is configured in Settings;
-                otherwise use the copy buttons.
+                Filings go out <strong>from the client&apos;s email</strong> —
+                not Switchboard&apos;s. The platform decrypts the
+                client&apos;s stored <code>client_email</code> credential
+                at send time, opens their SMTP, and authenticates as the
+                client. Regulators reply to whoever sent the mail, so
+                the From line matters for chain-of-custody.{" "}
+                <a
+                  href={`/clients/${approval.client_id}`}
+                  className="text-slate-700 underline"
+                >
+                  Add / update the credential →
+                </a>
               </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-[6rem_1fr]">
                 <label className="self-center text-xs text-slate-600">To</label>

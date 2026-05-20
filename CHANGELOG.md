@@ -6,6 +6,89 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.15 — Filings send FROM THE CLIENT, not from Switchboard · 2026-05-20
+
+### Fixed — chain-of-custody on outbound regulator email
+v1.3.14 added the email packet but used the platform SMTP for
+outbound. That's wrong for filings: NECA / FCC / state PUCs expect
+the From line to be the **client** (or the authorized agent under
+the LOA). Replies go to whoever sent the mail, so the From line
+matters legally.
+
+Platform SMTP stays exactly what it was — Switchboard's own outbound
+for operator notifications (approval-queue alerts, self-tests). It
+is NOT used for filings anymore.
+
+### Client SMTP credential lookup (`app/vault.py`)
+- `get_client_email_credential(db, client_id, actor)` reads the
+  first stored credential whose service is `client_email`, `email`,
+  or `smtp`. Decrypts the secret via the audited `use_credential`
+  path so every outbound filing leaves a forensic record.
+- SMTP host resolution:
+  - Explicit: `url` field accepts `smtp.host.com`,
+    `smtp.host.com:465`, `smtps://...`, etc.
+  - Inferred: if `url` is blank, the resolver maps the email domain
+    to known providers (gmail, outlook, icloud, yahoo, aol, zoho,
+    fastmail, protonmail).
+  - Unknown domain + no URL → resolver returns `None` so the
+    operator gets a clear "add the SMTP host" prompt rather than a
+    silent failure.
+
+### New SMTP send path (`app/notifications.send_via_client_smtp`)
+Opens the CLIENT's SMTP, logs in as the client, sends the mail.
+Returns `(sent, message_id, error)`. Port 465 uses implicit SSL;
+everything else uses STARTTLS. Same Message-ID capture so future
+inbound-reply matching works regardless of which SMTP path was used.
+
+### `/approvals/{id}/send-email` defaults to client path
+- Body: `{ to, subject, body, cc, via: 'client' | 'platform' }`
+- `via='client'` (default): uses the client's credential. Returns
+  `sent=false` with an explanatory error if no credential is on
+  file — the UI surfaces "add a client_email credential" rather
+  than silently falling through to platform SMTP.
+- `via='platform'`: escape hatch for legitimate Switchboard-as-
+  sender mail (internal forwards, test sends). Audit row records
+  `via` so the forensic trail is unambiguous.
+
+### Email packet From line
+Executors now resolve the From in this order:
+1. Stored `client_email` / `email` / `smtp` credential's username
+2. Intake `officer_email`
+3. Placeholder `"[client email — add a 'client_email' credential
+   in the vault]"` so the operator sees the gap immediately
+
+### Approval card UI copy
+Clear callout right under "Email packet": *"Filings go out from the
+client's email — not Switchboard's. The platform decrypts the
+client's stored client_email credential at send time, opens their
+SMTP, and authenticates as the client. Regulators reply to whoever
+sent the mail, so the From line matters for chain-of-custody.
+Add / update the credential →"* with link to the client's vault.
+
+### Tests (`tests/test_client_smtp.py`, 13 new)
+- 7 unit tests on the SMTP URL parser (bare host, with port,
+  implicit-SSL 465, scheme prefixes, empty input).
+- 3 unit tests on the email-domain → provider inference table.
+- 4 DB/HTTP tests: credential resolution returns None when missing /
+  resolves with explicit host / infers from Gmail domain / refuses
+  unknown domain without URL; `/send-email` errors clearly when no
+  credential; `/send-email` succeeds end-to-end with mocked SMTP
+  and recorded `email_message_id`.
+
+158 tests passing.
+
+### How to use
+On the client's page, in the Credentials vault, add a credential:
+- **service**: `client_email`
+- **username**: the client's email (e.g. `amber@amano.com`)
+- **secret**: their SMTP / app password
+- **URL**: optional — leave blank for Gmail/Outlook/iCloud/Yahoo
+  (auto-inferred); fill in for custom domains
+  (`smtp.yourdomain.com:587` or `smtps://...:465`)
+
+Then on any approval's Email packet section, click **Send via email
+▸** — it goes out FROM that address.
+
 ## v1.3.14 — Email packets on every filing + reply-paste loop · 2026-05-20
 
 ### Added — every approved filing comes with a ready-to-send email

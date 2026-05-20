@@ -422,7 +422,7 @@ async def send_email_for_approval(
     inbound replies back to the same approval. Audited as
     `approval.emailed`. Fails gracefully with a 400 if SMTP isn't
     configured — the UI can then fall back to its copy-paste path."""
-    from app.notifications import send_email_now  # noqa: PLC0415
+    from app.notifications import send_email_now, send_via_client_smtp  # noqa: PLC0415
 
     approval, client = await _load_owned(approval_id, user, db)
     packet = approval.email_packet or {}
@@ -443,9 +443,22 @@ async def send_email_for_approval(
             detail=f"Recipient is still a placeholder ({to}); override 'to' in the request.",
         )
 
-    sent, message_id, error = await send_email_now(
-        db, to=to, subject=subject, body=body_text, cc=cc
-    )
+    if body.via == "client":
+        sent, message_id, error = await send_via_client_smtp(
+            db,
+            client_id=client.id,
+            actor=user.email,
+            to=to,
+            subject=subject,
+            body=body_text,
+            cc=cc,
+        )
+        sender_path = "client"
+    else:
+        sent, message_id, error = await send_email_now(
+            db, to=to, subject=subject, body=body_text, cc=cc
+        )
+        sender_path = "platform"
     if sent:
         approval.email_sent_at = datetime.now(UTC)
         approval.email_message_id = message_id
@@ -459,6 +472,7 @@ async def send_email_for_approval(
                 "to": to,
                 "subject": subject,
                 "message_id": message_id,
+                "via": sender_path,
             },
         )
         await db.commit()
