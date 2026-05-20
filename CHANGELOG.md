@@ -6,6 +6,53 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.2 — Founder docs go optional + stage-aware required fields · 2026-05-20
+
+### Changed — Founder-stage onboarding is no longer a wall
+
+User feedback from the first real client onboarding: the four
+founder-stage documents (SSN card, driver's license, founder photo,
+utility bill) were marked mandatory and blocked intake completion.
+But the client realistically doesn't have to provide all four — most
+are only needed for *specific* downstream steps (SSN for the SS-4
+EIN application, DL for a few state-of-formation filings, utility
+bill for some bank KYC).
+
+Three coordinated changes so the operator can start processing with
+whatever the client provides:
+
+1. **Founder docs → PHASE_LAUNCH** (deferred). They still appear on
+   the client page so the operator sees what *may* be useful later,
+   but with the "needed at launch" blue badge and "later" status —
+   not the red asterisk / "missing" treatment. Intake completeness
+   no longer blocks on them.
+2. **Stage-aware required intake fields**. A founder-stage client
+   (pre-EIN) is only checked against `REQUIRED_FOUNDER_FIELDS` —
+   the ten basics needed to drive entity formation (legal_name,
+   entity_type, formation_state, principal_address, officer info,
+   primary contact info). `ein`, `target_states`, and
+   `estimated_monthly_revenue` are deferred to entity stage and only
+   become required once the EIN is captured.
+3. **Result**: a founder-stage client can be marked `intake ✓
+   complete` immediately after capturing the basics, unlocking the
+   first applications (entity_formation, ein, bank_account) in the
+   Next steps section. When the EIN gets recorded later, the client
+   transitions to entity stage and the entity-stage fields + four
+   PHASE_INTAKE docs become required for the next round.
+
+Verified live with a fresh founder client (Demo Telecom LLC, no EIN):
+intake completed without any docs uploaded, all four founder docs
+rendered with the "needed at launch" badge instead of blocking.
+
+### Tests
+- `test_doc_requirements` updated: the old "all founder docs
+  mandatory" assertion is gone; new tests assert the four are
+  PHASE_LAUNCH + `mandatory=False`, intake completes with no docs
+  at founder stage, and transitioning to entity stage (EIN
+  captured) re-raises the entity-stage requirements.
+
+107 backend tests pass, tsc clean.
+
 ## v1.3.1 — "What this agent can do" + per-agent prompt hints · 2026-05-20
 
 ### Added — Capability panel under Run-an-agent

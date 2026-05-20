@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Human-readable version stamp shown on the Settings page. Bumped
     # in CHANGELOG.md commits; the live commit SHA below comes from
     # the deploy platform and is the authoritative "what's running".
-    app_version: str = "1.3.1"
+    app_version: str = "1.3.2"
     # Railway sets this automatically; safe to leave blank in dev.
     # Read at request time so a redeploy shows the new hash without
     # restarting the import-time settings cache.

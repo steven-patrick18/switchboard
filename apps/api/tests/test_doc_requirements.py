@@ -24,17 +24,24 @@ _ENTITY = {
 }
 
 
-def test_single_founder_starts_with_personal_docs():
-    # No intake / no EIN → a single person can start here.
+def test_single_founder_starts_with_optional_personal_docs():
+    """At founder stage the four personal docs (SSN, DL, photo,
+    utility bill) are LISTED so the operator knows what may be
+    useful later, but NONE of them are mandatory — they're
+    PHASE_LAUNCH (deferred). The operator decides per-client whether
+    to request them; the platform never blocks intake on them."""
     assert intake_stage(None) == "founder"
     docs = resolve_required_documents(None)
     assert {d.key for d in docs} == _FOUNDER
-    assert all(d.mandatory for d in docs)
+    # All four are deferred to launch phase; none block intake.
+    assert all(d.phase == "launch" for d in docs)
+    assert all(d.mandatory is False for d in docs)
     by = {d.key: d for d in docs}
     assert by["ssn_card"].needs_scan is True
     assert by["drivers_license"].needs_scan is True
-    assert by["founder_photo"].needs_scan is False  # a photo, not a scan
-    assert mandatory_document_keys(None) == [d.key for d in docs]
+    assert by["founder_photo"].needs_scan is False
+    # No mandatory founder-stage docs — list is empty.
+    assert mandatory_document_keys(None) == []
 
     # An intake started but not yet formed is still founder stage.
     started = SimpleNamespace(ein=None, intends_international=False, target_states=[])
@@ -66,15 +73,68 @@ def test_entity_conditionals_international_and_states():
     assert by["state_cpcn_notarized"].needs_scan is True
 
 
-def test_evaluate_marks_provided_and_missing_founder_stage():
+def test_evaluate_marks_provided_at_founder_stage_but_nothing_blocks():
+    """At founder stage, document uploads are tracked (so the operator
+    sees what's been received) but NONE are missing_documents — they're
+    all PHASE_LAUNCH, so they never block intake. Whether the client
+    uploaded their DL or not, the operator can proceed."""
     c = evaluate(None, {"drivers_license"})
     assert c.stage == "founder"
     by = {d.key: d for d in c.required_documents}
+    # Tracked as provided / not provided so the UI can show "sent ✓".
     assert by["drivers_license"].provided is True
     assert by["ssn_card"].provided is False
-    assert "drivers_license" not in c.missing_documents
-    assert "ssn_card" in c.missing_documents
+    # But none of them appear in missing_documents — they're optional.
+    assert c.missing_documents == []
+    # Still NOT complete because the intake FIELDS aren't filled yet
+    # (legal_name, formation_state, officer_name, etc.).
     assert c.complete is False
+    assert "legal_name" in c.missing_fields
+
+
+def test_founder_stage_intake_can_complete_with_only_minimal_fields():
+    """The key user-facing fix: a founder-stage client doesn't need an
+    EIN (or target_states, or revenue) to be intake-complete. They
+    submit the founder essentials, the operator drives formation, and
+    THEN the entity-stage requirements kick in."""
+    founder = SimpleNamespace(
+        legal_name="Amano Telecom LLC",
+        entity_type="LLC",
+        formation_state="WY",
+        ein=None,  # not obtained yet — this is the whole point
+        principal_address={"street": "1 Main", "city": "Cheyenne", "zip": "82001"},
+        officer_name="Amber Sidney Hunt",
+        officer_title="Member",
+        officer_email="amber@amano.example",
+        primary_contact_name="Amber Sidney Hunt",
+        primary_contact_email="amber@amano.example",
+        primary_contact_phone="+13075550100",
+        target_states=None,   # decided later
+        intends_international=False,
+        estimated_monthly_revenue=None,  # decided later
+    )
+    # No docs uploaded — still ok at founder stage.
+    c = evaluate(founder, set())
+    assert c.stage == "founder"
+    assert c.missing_fields == []
+    assert c.missing_documents == []
+    assert c.complete is True
+
+    # Now flip to entity stage (EIN obtained) — entity-stage fields
+    # (target_states, revenue) become required, and the four entity-stage
+    # docs become required too.
+    formed = SimpleNamespace(
+        **{k: v for k, v in founder.__dict__.items()},
+    )
+    formed.ein = "39-2196239"
+    c2 = evaluate(formed, set())
+    assert c2.stage == "entity"
+    assert "target_states" in c2.missing_fields
+    assert "estimated_monthly_revenue" in c2.missing_fields
+    # Entity-stage docs (formation cert, EIN letter, officer ID, proof
+    # of address) are now PHASE_INTAKE-required.
+    assert "formation_certificate" in c2.missing_documents
+    assert c2.complete is False
 
 
 def _full_intake(**overrides) -> SimpleNamespace:

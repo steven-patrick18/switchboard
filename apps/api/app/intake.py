@@ -22,13 +22,15 @@ from dataclasses import dataclass, replace
 
 from app.models.client_intake import ClientIntake
 
-# Intake fields that must be captured before a client is considered fully
-# onboarded.
-REQUIRED_INTAKE_FIELDS: tuple[str, ...] = (
+# Intake fields by stage. At FOUNDER stage the entity hasn't been
+# formed yet, so the EIN field can't possibly be filled — we don't
+# block on it. Other entity-only fields (target_states, revenue) are
+# also deferred to entity stage so a founder-stage capture can complete
+# with just the basics needed to form the LLC and obtain the EIN.
+REQUIRED_FOUNDER_FIELDS: tuple[str, ...] = (
     "legal_name",
     "entity_type",
     "formation_state",
-    "ein",
     "principal_address",
     "officer_name",
     "officer_title",
@@ -36,9 +38,19 @@ REQUIRED_INTAKE_FIELDS: tuple[str, ...] = (
     "primary_contact_name",
     "primary_contact_email",
     "primary_contact_phone",
+)
+
+REQUIRED_ENTITY_FIELDS: tuple[str, ...] = REQUIRED_FOUNDER_FIELDS + (
+    # Captured once the entity is formed and the IRS has issued the EIN.
+    "ein",
     "target_states",
     "estimated_monthly_revenue",
 )
+
+# Backward-compat alias for callers that pre-date the stage split.
+# `mandatory_document_keys()` and external code that imports this still
+# works; new code should use the stage-specific tuple.
+REQUIRED_INTAKE_FIELDS: tuple[str, ...] = REQUIRED_ENTITY_FIELDS
 
 PHASE_INTAKE = "intake"   # blocker — must have it to submit intake
 PHASE_LAUNCH = "launch"   # deferred — needed during the launch, not now
@@ -57,11 +69,18 @@ class RequiredDoc:
 # (label, needs_scan, phase). The decision of WHICH apply to a given
 # client is made by resolve_required_documents below — not a flat list.
 _CATALOG: dict[str, tuple[str, bool, str]] = {
-    # Founder stage — personal KYC + basis to form the LLC. All blockers.
-    "ssn_card": ("Social Security card or SSN/ITIN confirmation", True, PHASE_INTAKE),
-    "drivers_license": ("Driver's license or government photo ID", True, PHASE_INTAKE),
-    "founder_photo": ("Recent photo of the founder", False, PHASE_INTAKE),
-    "utility_bill": ("Utility bill — proof of personal address", True, PHASE_INTAKE),
+    # Founder stage — personal KYC / formation-aid documents. All
+    # DEFERRED: the platform never blocks intake on these. They're
+    # listed so the operator knows they may be needed for specific
+    # downstream steps (SSN for the SS-4 / EIN application, DL for
+    # the registered-agent filing in some states, utility bill for
+    # certain bank KYC checks). If the client provides them, great —
+    # if not, the operator either uses what was already captured in
+    # the intake fields or requests them at the point of need.
+    "ssn_card": ("Social Security card or SSN/ITIN confirmation", True, PHASE_LAUNCH),
+    "drivers_license": ("Driver's license or government photo ID", True, PHASE_LAUNCH),
+    "founder_photo": ("Recent photo of the founder", False, PHASE_LAUNCH),
+    "utility_bill": ("Utility bill — proof of personal address", True, PHASE_LAUNCH),
 
     # Entity stage — what the client genuinely has at intake time.
     "formation_certificate": ("Certificate of Formation / Articles", False, PHASE_INTAKE),
@@ -184,12 +203,23 @@ class Completeness:
 def evaluate(
     intake: ClientIntake | None, provided_document_types: set[str]
 ) -> Completeness:
+    # Stage-aware required field set. Pre-EIN founders are only asked
+    # for what they can possibly have right now; post-EIN entities are
+    # checked against the full set (including EIN, target_states,
+    # revenue). When the operator records an EIN later, completeness
+    # re-evaluates against the entity-stage set automatically.
+    stage = intake_stage(intake)
+    field_set = (
+        REQUIRED_FOUNDER_FIELDS
+        if stage == STAGE_FOUNDER
+        else REQUIRED_ENTITY_FIELDS
+    )
     missing_fields = (
-        list(REQUIRED_INTAKE_FIELDS)
+        list(field_set)
         if intake is None
         else [
             f
-            for f in REQUIRED_INTAKE_FIELDS
+            for f in field_set
             if _is_empty(getattr(intake, f, None))
         ]
     )
