@@ -6,6 +6,32 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.1 — "What this agent can do" + per-agent prompt hints · 2026-05-20
+
+### Added — Capability panel under Run-an-agent
+- Selecting an agent in the Run-an-agent dropdown now reveals a
+  panel listing every tool that agent has access to, with a
+  color-coded tier pill (T0 / T1 green = auto-run; T2 amber, T3
+  red = queues for your approval) and a one-line description.
+- The same panel ends with the legend "T0/T1 run automatically.
+  T2/T3 actions are intercepted and queued for your approval —
+  they NEVER execute without your sign-off" so a new operator
+  immediately understands the safety boundary.
+
+### Added — Per-agent prompt placeholders
+- The Instruction field's placeholder text now adapts to the
+  selected agent: `compliance` shows "e.g. Draft the FCC 499-A
+  based on captured intake", `carrier` shows "Draft the NECA-OCN-2
+  application and LOA", `state_licensing` shows "Draft the Texas
+  SPCOA application", etc. New operators see the kind of request
+  that fits each agent without having to read docs.
+
+### Wired
+- The client page now hits `GET /agents/tools` on first load
+  (in parallel with `GET /agents`) and caches both into local
+  state. No new endpoints; both already existed for the AI Agents
+  GUI.
+
 ## v1.3.0 — Next steps + readiness agent · 2026-05-20
 
 ### Added — "What can we start right now?" answered on every client page

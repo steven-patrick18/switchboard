@@ -72,6 +72,32 @@ type ShareLink = {
   created_at: string;
 };
 
+// Per-tier styling reused inside the Run-an-agent capability panel.
+const AGENT_TIER_STYLE: Record<string, string> = {
+  T0: "bg-green-100 text-green-800",
+  T1: "bg-emerald-100 text-emerald-800",
+  T2: "bg-amber-100 text-amber-800",
+  T3: "bg-red-100 text-red-800",
+};
+const AGENT_TIER_LABEL: Record<string, string> = {
+  T0: "auto — runs immediately, no approval",
+  T1: "auto + notify — runs immediately, audited",
+  T2: "needs approval — queues; never runs without you",
+  T3: "high-risk — queues; never runs without you",
+};
+
+// Per-agent placeholder text so the operator sees the kind of request
+// that fits each agent's scope as soon as they pick it.
+const AGENT_PROMPT_HINT: Record<string, string> = {
+  pm: "e.g. Plan the whole launch and delegate sub-tasks to the right agents",
+  readiness: "e.g. Give me a status update on this launch",
+  intake: "e.g. Draft an email asking the client for their EIN letter",
+  compliance: "e.g. Draft the FCC 499-A based on captured intake",
+  state_licensing: "e.g. Draft the Texas SPCOA application",
+  carrier: "e.g. Draft the NECA-OCN-2 application and LOA",
+  document: "e.g. Draft an MSA template for Twilio carrier interconnect",
+};
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -382,6 +408,15 @@ export default function ClientDetailPage() {
     "compliance",
     "document",
   ]);
+  // Full agent details (tool whitelist + description) and tool catalog
+  // (tier + description per tool) so the Run-an-agent section can show
+  // the operator EXACTLY what the selected agent is able to do.
+  const [agentDetails, setAgentDetails] = useState<
+    Record<string, { description: string | null; tool_names: string[] }>
+  >({});
+  const [toolCatalog, setToolCatalog] = useState<
+    Record<string, { description: string; tier: string }>
+  >({});
   const [instruction, setInstruction] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -414,22 +449,44 @@ export default function ClientDetailPage() {
   }, [load]);
 
   // Pull the live agent roster (built-ins + the operator's custom
-  // agents) so newly-created ones show up in the dropdown without a
-  // hardcoded list.
+  // agents) PLUS the tool catalog so the Run-an-agent section can
+  // show the operator which tools the selected agent has access to.
   useEffect(() => {
     (async () => {
       try {
-        const rows = await apiFetch<{ name: string; enabled: boolean }[]>(
-          "/agents",
-        );
-        const enabled = rows
-          .filter((a) => a.enabled)
-          .map((a) => a.name);
-        // De-duplicate while preserving order (a custom agent named the
-        // same as a built-in appears once).
+        type AgentRow = {
+          name: string;
+          enabled: boolean;
+          description: string | null;
+          tool_names: string[];
+        };
+        type ToolRow = { name: string; description: string; tier: string };
+        const [rows, tools] = await Promise.all([
+          apiFetch<AgentRow[]>("/agents"),
+          apiFetch<ToolRow[]>("/agents/tools"),
+        ]);
+        const enabled = rows.filter((a) => a.enabled);
+        // De-duplicate names (custom override of a built-in appears once).
         const seen = new Set<string>();
-        const list = enabled.filter((n) => (seen.has(n) ? false : (seen.add(n), true)));
+        const list = enabled
+          .map((a) => a.name)
+          .filter((n) => (seen.has(n) ? false : (seen.add(n), true)));
         if (list.length > 0) setAvailableAgents(list);
+        const detail: Record<string, { description: string | null; tool_names: string[] }> = {};
+        for (const a of enabled) {
+          if (!detail[a.name]) {
+            detail[a.name] = {
+              description: a.description,
+              tool_names: a.tool_names,
+            };
+          }
+        }
+        setAgentDetails(detail);
+        const cat: Record<string, { description: string; tier: string }> = {};
+        for (const t of tools) {
+          cat[t.name] = { description: t.description, tier: t.tier };
+        }
+        setToolCatalog(cat);
       } catch {
         // Fall through to the hardcoded default list.
       }
@@ -1038,7 +1095,10 @@ export default function ClientDetailPage() {
           </select>
           <input
             className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-            placeholder="Instruction (e.g. Plan the launch / File the FCC 499)"
+            placeholder={
+              AGENT_PROMPT_HINT[agent] ??
+              "Instruction (e.g. Plan the launch / File the FCC 499)"
+            }
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
           />
@@ -1050,7 +1110,59 @@ export default function ClientDetailPage() {
             Run
           </button>
         </div>
-        <p className="mt-1 text-xs text-slate-500">
+
+        {/* What this agent will do — tool catalog with tier color so
+            the operator sees which actions auto-run vs queue for
+            approval BEFORE clicking Run. */}
+        {agentDetails[agent] && (
+          <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              What {agent} can do
+            </p>
+            {agentDetails[agent].description && (
+              <p className="mt-1 text-xs text-slate-700">
+                {agentDetails[agent].description}
+              </p>
+            )}
+            <ul className="mt-2 space-y-1">
+              {agentDetails[agent].tool_names.map((toolName) => {
+                const t = toolCatalog[toolName];
+                if (!t) return null;
+                return (
+                  <li
+                    key={toolName}
+                    className="flex items-start gap-2 text-xs"
+                  >
+                    <span
+                      className={
+                        "shrink-0 rounded px-1.5 py-0.5 font-semibold " +
+                        (AGENT_TIER_STYLE[t.tier] ?? "bg-slate-200 text-slate-700")
+                      }
+                      title={AGENT_TIER_LABEL[t.tier] ?? t.tier}
+                    >
+                      {t.tier}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="font-mono text-slate-800">{toolName}</span>{" "}
+                      <span className="text-slate-600">— {t.description}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-3 text-xs text-slate-500">
+              <span className="rounded bg-green-100 px-1 font-semibold text-green-800">T0</span> /{" "}
+              <span className="rounded bg-emerald-100 px-1 font-semibold text-emerald-800">T1</span>{" "}
+              run automatically. {" "}
+              <span className="rounded bg-amber-100 px-1 font-semibold text-amber-800">T2</span> /{" "}
+              <span className="rounded bg-red-100 px-1 font-semibold text-red-800">T3</span>{" "}
+              actions are intercepted and queued for your approval —{" "}
+              <strong>they NEVER execute without your sign-off</strong>.
+            </p>
+          </div>
+        )}
+
+        <p className="mt-2 text-xs text-slate-500">
           Needs ANTHROPIC_API_KEY on the API; gated actions land in the
           approval queue.
         </p>
