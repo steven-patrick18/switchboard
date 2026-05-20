@@ -6,6 +6,29 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.1.0 — Self-hosted VPS deploy + update flow · 2026-05-20
+
+### Added
+- **`deploy/docker-compose.yml`** — full stack (postgres + api + web
+  + Caddy reverse proxy) with named volumes for data persistence.
+- **`deploy/Caddyfile`** — automatic Let's Encrypt HTTPS, no certbot
+  needed; Caddy handles renewal in the background.
+- **`deploy/install.sh`** — idempotent first-time install. Installs
+  Docker if missing, generates `POSTGRES_PASSWORD` + `APP_SECRET_KEY`,
+  prompts for domains/email, builds + starts the stack.
+- **`deploy/update.sh`** — one-line update after each git push:
+  fast-forwards `main`, rebuilds only changed containers, restarts
+  in dependency order. No-ops when nothing changed (safe in cron).
+- **`deploy/backup.sh`** — daily Postgres dump + documents-volume
+  tar. Keeps last 14 days.
+- **`docs/VPS_DEPLOY.md`** — non-coder walkthrough: DNS → SSH →
+  install → verify → updates → backups → day-2 operations.
+
+### Why
+You can now self-host on any Ubuntu/Debian VPS in ~20 minutes
+instead of using Railway. Update flow stays simple:
+`git push` → `bash deploy/update.sh` on the VPS.
+
 ## v1.0.0 — Ready for first paying customer · 2026-05-20
 
 The platform is end-to-end usable for a real US VoIP launch. The

@@ -43,9 +43,14 @@ Backend uses SQLite locally; see [CLAUDE.md](CLAUDE.md) for exact commands. In s
 
 Copy `.env.example` → `.env` for config. Never commit `.env`.
 
-## Production deploy (Railway, ~30 min)
+## Production deploy
 
-See [docs/DEPLOY.md](docs/DEPLOY.md) for a step-by-step walkthrough that doesn't assume coding knowledge. The repo ships with production-ready Dockerfiles for both `apps/api` and `apps/web`, `railway.toml` configs, and the API entrypoint auto-applies Alembic migrations on every boot so deploys "just work".
+Two paths, both step-by-step for non-coders:
+
+- **[docs/VPS_DEPLOY.md](docs/VPS_DEPLOY.md)** — self-host on your own VPS (Hetzner, DigitalOcean, etc.). One `bash deploy/install.sh` brings up Postgres + API + Web + Caddy reverse proxy with auto-HTTPS via Let's Encrypt. `bash deploy/update.sh` after each `git push` redeploys.
+- **[docs/DEPLOY.md](docs/DEPLOY.md)** — Railway (managed, faster to set up, no Linux knowledge needed).
+
+Both paths share the same Dockerfiles (`apps/api/Dockerfile`, `apps/web/Dockerfile`) and the API entrypoint auto-applies Alembic migrations on boot, so deploys "just work".
 
 ## Security
 

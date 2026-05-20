@@ -1,0 +1,62 @@
+# Caddy reverse proxy — auto-HTTPS via Let's Encrypt.
+#
+# Caddy automatically:
+#   - listens on :80 + :443
+#   - obtains and renews Let's Encrypt certificates for each domain
+#     once DNS resolves and ACME challenges succeed
+#   - redirects HTTP → HTTPS
+#   - speaks HTTP/2 and HTTP/3
+#
+# The two ${...} placeholders are filled from environment variables
+# passed in by docker-compose (API_DOMAIN, WEB_DOMAIN, ACME_EMAIL).
+
+{
+    # The email Let's Encrypt sends expiration warnings to. Required
+    # in production; pick the operator's real email.
+    email {$ACME_EMAIL}
+}
+
+# API service — internally on api:8000, externally on https://api.your-domain.com
+{$API_DOMAIN} {
+    reverse_proxy api:8000
+
+    # Tighten common security headers. CORS itself is enforced by the
+    # API; this just nudges browsers to be conservative.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Don't leak which framework runs here.
+        -Server
+    }
+
+    # Health-check endpoint can stay unauthenticated.
+    log {
+        output file /data/access-api.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+        format json
+    }
+}
+
+# Web (Next.js) — internally on web:3000, externally on https://app.your-domain.com
+{$WEB_DOMAIN} {
+    reverse_proxy web:3000
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    log {
+        output file /data/access-web.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+        format json
+    }
+}

@@ -1,0 +1,96 @@
+# Switchboard — self-hosted production stack.
+#
+# Four services:
+#   postgres — managed Postgres 16, with a named volume for persistence
+#   api      — FastAPI backend (auto-runs alembic migrations on boot)
+#   web      — Next.js operator UI
+#   caddy    — reverse proxy + automatic Let's Encrypt HTTPS
+#
+# Bring up the whole stack from the repo root:
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#
+# Or just run deploy/update.sh after each `git pull` — it does the same.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: switchboard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: switchboard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U switchboard -d switchboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://switchboard:${POSTGRES_PASSWORD}@postgres:5432/switchboard
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      ENVIRONMENT: production
+      # The web URL is the only allowed CORS origin in prod.
+      CORS_ORIGINS: https://${WEB_DOMAIN}
+      APP_BASE_URL: https://${WEB_DOMAIN}
+      # Optional — set these here OR via the Settings GUI after first login.
+      # The GUI override takes precedence if both are present.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AGENT_MODEL: ${AGENT_MODEL:-claude-opus-4-7}
+      # Documents are persisted in the named volume below — survives
+      # container rebuilds and `docker compose down`.
+      DOCUMENTS_DIR: /app/.documents
+    volumes:
+      - documents_data:/app/.documents
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      args:
+        # Baked into the JS bundle at build time. Changing it requires a rebuild.
+        NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: https://${API_DOMAIN}
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+      WEB_DOMAIN: ${WEB_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Let's Encrypt certs + Caddy state survive restarts.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+
+volumes:
+  postgres_data:
+  documents_data:
+  caddy_data:
+  caddy_config:
