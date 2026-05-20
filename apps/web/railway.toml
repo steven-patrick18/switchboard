@@ -1,0 +1,12 @@
+# Railway service config for the Switchboard Web (Next.js operator UI).
+# Used when this directory is set as the service root in the Railway UI.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+# NEXT_PUBLIC_API_URL must be passed as a build-time arg so Next inlines
+# it into the client bundle. Set it in the service Variables tab BEFORE
+# the first build; changing it later requires a rebuild.
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

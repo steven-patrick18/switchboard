@@ -38,9 +38,13 @@ switchboard/
 
 ## Quickstart (local, no Docker)
 
-Backend uses SQLite locally; see [CLAUDE.md](CLAUDE.md) for exact commands. In short: install API deps, `alembic upgrade head` against a SQLite `DATABASE_URL`, run `uvicorn app.main:app`, then `npm run dev` in `apps/web`. Agent runs need `ANTHROPIC_API_KEY` in a repo-root `.env`; everything else works keyless.
+Backend uses SQLite locally; see [CLAUDE.md](CLAUDE.md) for exact commands. In short: install API deps, `alembic upgrade head` against a SQLite `DATABASE_URL`, run `uvicorn app.main:app`, then `npm run dev` in `apps/web`. Agent runs need `ANTHROPIC_API_KEY` (settable from the Settings UI once the API is up); everything else works keyless.
 
-Copy `.env.example` → `.env` for config. Never commit `.env`. E-signature provider is self-hosted **Documenso**.
+Copy `.env.example` → `.env` for config. Never commit `.env`.
+
+## Production deploy (Railway, ~30 min)
+
+See [docs/DEPLOY.md](docs/DEPLOY.md) for a step-by-step walkthrough that doesn't assume coding knowledge. The repo ships with production-ready Dockerfiles for both `apps/api` and `apps/web`, `railway.toml` configs, and the API entrypoint auto-applies Alembic migrations on every boot so deploys "just work".
 
 ## Security
 

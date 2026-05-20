@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Switchboard is an AI-operator platform for US VoIP company launches: a human operator supervises Claude agents that draft/queue work; every regulated or external action waits in an approval queue; everything is audited. Monorepo: `apps/web` (Next.js 14 operator UI), `apps/api` (FastAPI backend + agent runtime). See `README.md` for product framing and `docs/Switchboard.pptx` for the full brief.
+Switchboard is an AI-operator platform for US VoIP company launches: a human operator supervises Claude agents that draft/queue work; every regulated or external action waits in an approval queue; everything is audited. Monorepo: `apps/web` (Next.js 14 operator UI), `apps/api` (FastAPI backend + agent runtime). See `README.md` for product framing, `docs/Switchboard.pptx` for the full brief, and `docs/DEPLOY.md` for the production Railway deployment walkthrough.
 
 ## Commands
 
