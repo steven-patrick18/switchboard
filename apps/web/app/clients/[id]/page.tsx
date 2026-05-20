@@ -8,6 +8,7 @@ import { apiFetch, downloadFile, fetchBlob } from "@/lib/api";
 import AppShell from "@/app/AppShell";
 import IntakeForm, { type IntakeFields } from "./IntakeForm";
 import LaunchProgress from "./LaunchProgress";
+import NextSteps from "./NextSteps";
 
 type RequiredDoc = {
   key: string;
@@ -463,27 +464,32 @@ export default function ClientDetailPage() {
     );
   }
 
-  async function runAgent() {
+  async function runAgentWith(agentName: string, instr: string) {
     setBusy(true);
     setMsg(null);
     try {
       const r = await apiFetch<{ text: string; approval_ids: string[] }>(
-        `/agents/${agent}/run`,
+        `/agents/${agentName}/run`,
         {
           method: "POST",
-          body: JSON.stringify({ client_id: id, instruction }),
+          body: JSON.stringify({ client_id: id, instruction: instr }),
         },
       );
       setMsg(
-        `${agent} ran. ${r.approval_ids.length} approval(s) queued. ` +
+        `${agentName} ran. ${r.approval_ids.length} approval(s) queued. ` +
           `Response: ${r.text.slice(0, 240)}`,
       );
       await load();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Run failed");
+      throw err;
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runAgent() {
+    return runAgentWith(agent, instruction);
   }
 
   const c = intake?.completeness;
@@ -685,6 +691,9 @@ export default function ClientDetailPage() {
           Submit intake
         </button>
       </section>
+
+      {/* Next steps — what's ready to start right now */}
+      <NextSteps clientId={id} onAgentRun={runAgentWith} />
 
       {/* Launch progress — per-filing stage tracker */}
       <LaunchProgress clientId={id} />

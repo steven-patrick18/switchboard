@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import readiness as readiness_mod
 from app.api.deps import get_current_user
 from app.applications import (
     default_agent_for,
@@ -38,6 +39,7 @@ from app.schemas.applications import (
     ApplicationResolveResult,
     ApplicationUpdate,
 )
+from app.schemas.readiness import ReadinessItemOut, ReadinessSnapshotOut
 
 router = APIRouter(prefix="/clients/{client_id}/applications", tags=["applications"])
 
@@ -68,6 +70,47 @@ def _to_out(row: Application) -> ApplicationOut:
         external_ref=row.external_ref,
         created_at=row.created_at,
         updated_at=row.updated_at,
+    )
+
+
+@router.get("/readiness", response_model=ReadinessSnapshotOut)
+async def launch_readiness(
+    client_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ReadinessSnapshotOut:
+    """Deterministic 'what can we start right now?' answer for the
+    operator's UI. Splits every application into ready / blocked /
+    in_flight / complete based on intake completeness + per-app
+    prereqs (CORES → OCN → 499 → RMD → STIR/SHAKEN, etc.). The Start
+    button in the GUI uses owner_agent + instruction to kick off the
+    right agent with a pre-filled prompt."""
+    await _owned_client(client_id, user, db)
+    snap = await readiness_mod.compute(client_id, db)
+    def _to_out(items):
+        return [
+            ReadinessItemOut(
+                application_type=i.application_type,
+                application_id=i.application_id,
+                label=i.label,
+                owner_agent=i.owner_agent,
+                instruction=i.instruction,
+                stage=i.stage,
+                current_agent=i.current_agent,
+                blocked_on=i.blocked_on,
+                external_ref=i.external_ref,
+                notes=i.notes,
+            )
+            for i in items
+        ]
+    return ReadinessSnapshotOut(
+        intake_complete=snap.intake_complete,
+        intake_missing_fields=snap.intake_missing_fields,
+        intake_missing_documents=snap.intake_missing_documents,
+        ready=_to_out(snap.ready),
+        blocked=_to_out(snap.blocked),
+        in_flight=_to_out(snap.in_flight),
+        complete=_to_out(snap.complete),
     )
 
 

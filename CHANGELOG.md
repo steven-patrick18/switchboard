@@ -6,6 +6,53 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.0 — Next steps + readiness agent · 2026-05-20
+
+### Added — "What can we start right now?" answered on every client page
+- New **Next steps** section sits above Launch progress on the
+  client detail page. Splits every filing into four buckets:
+  - **Ready to start** — green cards with one-click Start buttons.
+    The platform picks the right agent (compliance for CORES /
+    499 / RMD, carrier for OCN / STIR/SHAKEN / carrier MSAs,
+    state_licensing for state CPCNs, etc.) and pre-fills a
+    templated instruction so the operator doesn't have to think
+    about *who* does *what*.
+  - **In flight** — blue cards showing stage + which agent is
+    working + any operator note.
+  - **Blocked** — amber cards listing *exactly* which prereqs
+    aren't complete (e.g. "RMD: OCN (NECA) must be complete
+    (currently in_progress)").
+  - **Complete** — grey check-marks with external_ref numbers.
+
+### Added — Deterministic readiness module + new endpoint
+- `app/readiness.py` codifies the dependency graph (CORES →
+  OCN → 499 → RMD → STIR/SHAKEN, plus state CPCNs in parallel,
+  plus carrier interconnects gated on OCN+STIR/SHAKEN) and the
+  per-application templated prompts. Pure Python — no LLM cost,
+  no flakiness; the GUI calls it on every page load.
+- `GET /clients/{id}/applications/readiness` returns the
+  snapshot. Owner-scoped; 404 for non-owners.
+
+### Added — 7th built-in agent: `readiness`
+- Tools: `summarize_launch_status` (new, wraps the same compute),
+  `check_intake_status`, `update_application_stage`.
+- Scope is read-only advice: "given what you've got, here's
+  what to do next." Doesn't draft filings, doesn't delegate —
+  the operator clicks the Start buttons themselves. Useful as a
+  "what's going on?" command for an operator returning to a
+  client after a few days.
+- Registry now exposes seven agents: pm, readiness, intake,
+  compliance, state_licensing, carrier, document.
+
+### Tests
+- 6 new readiness tests cover the dependency unlocks
+  (CORES → OCN → RMD → STIR/SHAKEN), in-flight items NOT
+  appearing as ready, intake-incomplete locking everything,
+  and operator-scope isolation.
+- Agent roster test bumped to expect the 7th agent.
+
+106 backend tests pass; tsc clean. v1.3.0.
+
 ## v1.2.0 — Update + HTTPS + self-test in the GUI · 2026-05-20
 
 ### Added — Production-operations from the Settings page

@@ -730,6 +730,67 @@ async def _update_application_stage(args: dict, ctx: ToolContext) -> str:
     )
 
 
+async def _summarize_launch_status(_args: dict, ctx: ToolContext) -> str:
+    """Build a plain-text summary of the launch state for the agent's
+    context — what's ready to start, what's blocked, what's in flight,
+    what's complete. Uses the same deterministic computation the GUI's
+    Next steps section calls."""
+    if ctx.client_id is None:
+        return "No client context — cannot summarize launch."
+    from app import readiness as _r  # noqa: PLC0415
+
+    snap = await _r.compute(ctx.client_id, ctx.db)
+    lines: list[str] = []
+    if not snap.intake_complete:
+        lines.append("INTAKE INCOMPLETE — cannot start any filings yet:")
+        if snap.intake_missing_fields:
+            lines.append(
+                f"  Missing fields: {', '.join(snap.intake_missing_fields)}"
+            )
+        if snap.intake_missing_documents:
+            lines.append(
+                f"  Missing documents: {', '.join(snap.intake_missing_documents)}"
+            )
+        return "\n".join(lines)
+
+    lines.append(
+        f"READY TO START NOW ({len(snap.ready)} filings):"
+        if snap.ready
+        else "READY TO START NOW: nothing — all filings are in flight or done."
+    )
+    for it in snap.ready:
+        lines.append(f"  - {it.label}  (owner: {it.owner_agent})")
+    if snap.blocked:
+        lines.append(f"BLOCKED ({len(snap.blocked)} filings):")
+        for it in snap.blocked:
+            reasons = "; ".join(it.blocked_on or [])
+            lines.append(f"  - {it.label}: {reasons}")
+    if snap.in_flight:
+        lines.append(f"IN FLIGHT ({len(snap.in_flight)} filings):")
+        for it in snap.in_flight:
+            who = it.current_agent or "operator"
+            lines.append(f"  - {it.label}  ({it.stage}, {who})")
+    if snap.complete:
+        lines.append(f"COMPLETE ({len(snap.complete)} filings):")
+        for it in snap.complete:
+            lines.append(f"  - {it.label}")
+    return "\n".join(lines)
+
+
+summarize_launch_status = Tool(
+    name="summarize_launch_status",
+    description=(
+        "Return a plain-text snapshot of this client's launch — what's "
+        "ready to start NOW, what's blocked and on what, what's already "
+        "in flight, what's done. Owner of every ready item is named so "
+        "you can delegate. Read-only; safe for any agent to call."
+    ),
+    input_schema={"type": "object", "properties": {}},
+    tier=TIER_AUTO,
+    db_runner=_summarize_launch_status,
+)
+
+
 update_application_stage = Tool(
     name="update_application_stage",
     description=(
@@ -804,6 +865,9 @@ ALL_TOOLS: dict[str, Tool] = {
         # Status reporting — every agent should use this to mark
         # progress on its current application.
         update_application_stage,
+        # Launch-state summary — read-only; the readiness agent
+        # uses it heavily, others can call it when they need context.
+        summarize_launch_status,
     )
 }
 
