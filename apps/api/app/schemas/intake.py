@@ -33,6 +33,7 @@ class RequiredDocOut(BaseModel):
     label: str
     mandatory: bool
     needs_scan: bool
+    phase: str  # 'intake' = blocker; 'launch' = deferred (operator drafts during launch)
     provided: bool
 
 

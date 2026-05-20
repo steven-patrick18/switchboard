@@ -12,6 +12,7 @@ type RequiredDoc = {
   label: string;
   mandatory: boolean;
   needs_scan: boolean;
+  phase: string; // 'intake' or 'launch'
   provided: boolean;
 };
 
@@ -191,6 +192,14 @@ export default function ClientPortalPage({
                 <span>
                   {d.label}
                   {d.mandatory && <span className="text-red-600"> *</span>}
+                  {d.phase === "launch" && !d.provided && (
+                    <span
+                      className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-semibold text-blue-800"
+                      title="Your team prepares this during the launch — not needed now"
+                    >
+                      later
+                    </span>
+                  )}
                   {d.needs_scan && (
                     <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
                       scan
@@ -237,10 +246,16 @@ export default function ClientPortalPage({
                     className={
                       d.provided
                         ? "text-xs font-semibold text-green-700"
-                        : "text-xs font-semibold text-slate-400"
+                        : d.phase === "launch"
+                          ? "text-xs font-semibold text-blue-700"
+                          : "text-xs font-semibold text-slate-400"
                     }
                   >
-                    {d.provided ? "sent ✓" : "missing"}
+                    {d.provided
+                      ? "sent ✓"
+                      : d.phase === "launch"
+                        ? "later"
+                        : "missing"}
                   </span>
                 </span>
               </li>

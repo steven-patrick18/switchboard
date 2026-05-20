@@ -14,6 +14,7 @@ type RequiredDoc = {
   label: string;
   mandatory: boolean;
   needs_scan: boolean;
+  phase: string; // 'intake' (blocker) | 'launch' (deferred)
   provided: boolean;
 };
 type Completeness = {
@@ -574,9 +575,17 @@ export default function ClientDetailPage() {
                   <span>
                     {d.label}
                     {d.mandatory && (
-                      <span className="text-red-600" title="mandatory">
+                      <span className="text-red-600" title="required now">
                         {" "}
                         *
+                      </span>
+                    )}
+                    {d.phase === "launch" && !d.provided && (
+                      <span
+                        className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-semibold text-blue-800"
+                        title="Operator drafts/requests this during the launch — not needed at intake"
+                      >
+                        needed at launch
                       </span>
                     )}
                     {d.needs_scan && (
@@ -631,10 +640,16 @@ export default function ClientDetailPage() {
                       className={
                         d.provided
                           ? "text-xs font-semibold text-green-700"
-                          : "text-xs font-semibold text-slate-400"
+                          : d.phase === "launch"
+                            ? "text-xs font-semibold text-blue-700"
+                            : "text-xs font-semibold text-slate-400"
                       }
                     >
-                      {d.provided ? "provided ✓" : "missing"}
+                      {d.provided
+                        ? "provided ✓"
+                        : d.phase === "launch"
+                          ? "later"
+                          : "missing"}
                     </span>
                   </span>
                 </li>

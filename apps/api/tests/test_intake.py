@@ -100,32 +100,41 @@ async def test_capture_once_mandate(client: AsyncClient):
     # Docs still outstanding → still not complete, submit still blocked.
     assert comp["complete"] is False
 
-    # The mandated set is decided per client: target_states pulled in the
-    # notarized state CPCN packet, which is flagged as needing a scan.
+    # The mandated set is decided per client. target_states pulls in
+    # the notarized state CPCN packet, but it's PHASE_LAUNCH — the
+    # operator drafts it for the client to sign DURING the state
+    # filing, not at intake time, so it's listed but NOT a blocker.
     req = {d["key"]: d for d in comp["required_documents"]}
     assert "state_cpcn_notarized" in req
     assert req["state_cpcn_notarized"]["needs_scan"] is True
+    assert req["state_cpcn_notarized"]["phase"] == "launch"
+    assert req["state_cpcn_notarized"]["mandatory"] is False
     assert req["officer_government_id"]["needs_scan"] is True
+    assert req["officer_government_id"]["phase"] == "intake"
+    assert req["officer_government_id"]["mandatory"] is True
     assert req["ein_letter"]["needs_scan"] is False
-    assert all(d["mandatory"] for d in comp["required_documents"])
+    # The deferred set: things acquired during the launch, not at intake.
+    deferred = {d["key"] for d in comp["required_documents"] if not d["mandatory"]}
+    assert {"banking_letter", "corporate_authorization", "state_cpcn_notarized"} <= deferred
 
     r = await client.post(f"/clients/{cid}/intake/submit", headers=h)
-    assert r.status_code == 409
+    assert r.status_code == 409  # still blocked — intake-phase docs missing
 
-    # Upload exactly the documents the system decided are mandated.
-    for key in (d["key"] for d in comp["required_documents"]):
+    # Upload ONLY the intake-phase (mandatory) docs.
+    intake_phase = [d for d in comp["required_documents"] if d["mandatory"]]
+    for d in intake_phase:
         r = await client.post(
             f"/clients/{cid}/documents",
             headers=h,
-            data={"type": key},
-            files={"file": (f"{key}.pdf", b"%PDF-1.4 stub", "application/pdf")},
+            data={"type": d["key"]},
+            files={"file": (f"{d['key']}.pdf", b"%PDF-1.4 stub", "application/pdf")},
         )
         assert r.status_code == 201
-        body = r.json()
-        assert body["filename"] == f"{key}.pdf"
-        assert body["size_bytes"] == len(b"%PDF-1.4 stub")
 
     r = await client.get(f"/clients/{cid}/intake", headers=h)
+    # Intake is complete even though deferred docs (banking_letter,
+    # corporate_authorization, state_cpcn_notarized) haven't been
+    # uploaded — those come during the launch.
     assert r.json()["completeness"]["complete"] is True
 
     # Now the client can be locked as fully onboarded.
