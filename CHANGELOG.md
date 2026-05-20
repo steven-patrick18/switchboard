@@ -6,6 +6,73 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.10 — Tighter correction loop + stale Live-Activity fix · 2026-05-20
+
+### Fixed — Task close-out (Live Activity no longer shows phantom rows)
+When an operator decided the LAST pending approval on a task
+(approve, edit-and-approve, or reject), the parent `Task.status`
+stayed at `awaiting_approval` forever. The Live Activity feed
+filters by exactly that status, so completed work kept showing
+as "awaiting your approval" — that's what produced the
+red-boxed phantom row on Amber Sidney Hunt's activity page.
+
+Fix: `_close_task_if_done(task_id, db)` runs after every
+approve / reject / batch / send-back decision. It scans for any
+remaining pending approvals on the same task; if none, the task
+moves to `completed`. Tightly scoped — only flips from
+`awaiting_approval` (never from `running` / `queued`) so it
+cannot race with a still-running agent loop.
+
+### Added — `POST /approvals/{id}/send-back` (one-click correction)
+The original loop was "this approval looks wrong → Reject with a
+reason → manually click Start ▸ again on the client page → agent
+reruns and produces a fresh draft." That's three steps and a
+context switch. New endpoint collapses it to one:
+
+1. Operator clicks **Send back to agent** on the approval card
+2. Types what needs to change ("FRN should be 0001234567 — fill
+   it in instead of TBD")
+3. Submit
+
+Backend:
+- The current approval is rejected with the feedback as the
+  captured reason (so it ALSO writes an AgentLesson — the agent
+  learns from the correction on every subsequent run, not just
+  this one).
+- A new task is created on the same project, same agent, with
+  `instruction = original + "OPERATOR FEEDBACK: …" + "redo with
+  that change"`.
+- If `ANTHROPIC_API_KEY` is configured the agent runs in-line and
+  returns the new approval id(s). If not (or the run throws), the
+  new task lands as `queued` and the operator clicks Start ▸ when
+  ready. Either way the response tells the UI exactly what
+  happened.
+- Audited as `approval.sent_back` (distinct from `approval.rejected`)
+  so the history view can show "operator sent this back" vs.
+  "operator dropped this entirely."
+
+### Frontend (`apps/web/app/approvals/ApprovalCard.tsx`)
+- New **Send back to agent** button next to Approve / Edit / Reject.
+- Clicking it opens an inline indigo panel with a textarea and a
+  one-line explanation of what will happen.
+- Result panel after submit: "Agent re-ran. N new approval(s)
+  queued" or "Sent back — new task queued. Click Start ▸ on the
+  client page to run it" — collapsible "Show agent reply" if the
+  agent ran inline.
+
+### Tests (`tests/test_approval_close_out.py`)
+- Two-approval task: approve one → task stays `awaiting_approval`;
+  reject the other → task moves to `completed`. Locks in the
+  bug fix.
+- Send-back with no Anthropic key: original approval rejected with
+  feedback as reason, new task queued with the feedback inside
+  the instruction, parent task closes. 124 tests passing.
+- Blank-feedback send-back returns 422.
+
+No migration. The Anthropic key is read at send-back time so an
+operator on a key-less workspace can still queue the redo and
+hit Start themselves.
+
 ## v1.3.9 — Carrier agent stops stalling on OCN · 2026-05-20
 
 ### Fixed — carrier agent now always queues the NECA-OCN-2 draft

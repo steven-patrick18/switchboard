@@ -23,6 +23,8 @@ from app.schemas.approvals import (
     BatchBody,
     BatchResult,
     RejectBody,
+    SendBackBody,
+    SendBackResult,
 )
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
@@ -140,6 +142,27 @@ async def _agent_name_for_approval(approval: Approval, db: AsyncSession) -> str 
     return task.agent if task is not None else None
 
 
+async def _close_task_if_done(task_id: uuid.UUID, db: AsyncSession) -> None:
+    """Move the parent task to 'completed' once every approval it
+    queued has been decided. This is what was missing — without it
+    a task stayed at 'awaiting_approval' forever even after the
+    operator decided every approval, so the Live Activity feed kept
+    showing it as in-flight. We only flip from 'awaiting_approval'
+    (not from 'running', 'queued', or anything else) to avoid racing
+    with an agent that's still mid-loop."""
+    task = await db.get(Task, task_id)
+    if task is None or task.status != "awaiting_approval":
+        return
+    still_pending = await db.scalar(
+        select(func.count(Approval.id)).where(
+            Approval.task_id == task_id,
+            Approval.decision == DECISION_PENDING,
+        )
+    )
+    if not still_pending:
+        task.status = "completed"
+
+
 @router.post("/{approval_id}/approve", response_model=ApprovalOut)
 async def approve(
     approval_id: uuid.UUID,
@@ -198,6 +221,7 @@ async def approve(
         client_id=client.id,
         after={"result": approval.execution_result},
     )
+    await _close_task_if_done(approval.task_id, db)
     await db.commit()
     return _out(approval, client)
 
@@ -234,8 +258,146 @@ async def reject(
             reason=body.reason,
             approval_id=approval.id,
         )
+    await _close_task_if_done(approval.task_id, db)
     await db.commit()
     return _out(approval, client)
+
+
+@router.post("/{approval_id}/send-back", response_model=SendBackResult)
+async def send_back(
+    approval_id: uuid.UUID,
+    body: SendBackBody,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SendBackResult:
+    """One-click correction loop: this approval is wrong; rerun the
+    same agent with the operator's feedback so it produces an updated
+    draft. Concretely:
+
+      1. The pending approval is rejected with `feedback` as the
+         reason — which captures it as an AgentLesson so the agent
+         learns from the correction across future runs too.
+      2. A new task is created on the same project with the same
+         agent, and an instruction that combines the original
+         objective + the operator's correction.
+      3. If an Anthropic key is configured we run the agent in-line
+         and return the new approval id(s). If not (or the run
+         errors out), the new task stays queued — the operator can
+         hit Start on it later.
+    """
+    approval, client = await _load_owned(approval_id, user, db)
+    _require_pending(approval)
+    old_task = await db.get(Task, approval.task_id)
+    if old_task is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Original task missing; cannot send back.",
+        )
+    agent_name = old_task.agent
+    old_input = old_task.input or {}
+    original = str(
+        old_input.get("instruction") or old_input.get("objective") or ""
+    ).strip()
+
+    # Step 1 — reject the pending approval with the feedback as the
+    # captured reason. This is exactly the same path the explicit
+    # Reject button takes, so the lesson + audit semantics are
+    # identical.
+    approval.decision = DECISION_REJECTED
+    approval.reviewer_id = user.id
+    approval.note = body.feedback
+    approval.ts = datetime.now(UTC)
+    await record_audit(
+        db,
+        actor=user.email,
+        action="approval.sent_back",
+        subject=f"approval:{approval.id}",
+        client_id=client.id,
+        after={"decision": DECISION_REJECTED, "feedback": body.feedback},
+    )
+    if agent_name:
+        await record_rejection_lesson(
+            db,
+            owner_id=user.id,
+            agent_name=agent_name,
+            action_type=approval.action_type,
+            reason=body.feedback,
+            approval_id=approval.id,
+        )
+    await _close_task_if_done(approval.task_id, db)
+
+    # Step 2 — build a new task that tells the agent what to redo.
+    project_id = old_task.project_id
+    new_instruction = (
+        (original or f"Re-do {approval.action_type}.")
+        + "\n\nOPERATOR FEEDBACK on your previous draft "
+        + f"(approval {approval.id}): "
+        + body.feedback.strip()
+        + "\n\nProduce an updated draft that incorporates the operator's "
+        + "feedback above and queue it again."
+    )
+    new_task = Task(
+        project_id=project_id,
+        agent=agent_name or "pm",
+        status="queued",
+        input={"instruction": new_instruction, "sent_back_from": str(approval.id)},
+    )
+    db.add(new_task)
+    await db.flush()
+    new_task_id = new_task.id
+
+    # Step 3 — best-effort auto-run. We gracefully degrade if the
+    # Anthropic key isn't configured or the run itself errors. Worst
+    # case the task stays queued and the operator hits Start.
+    ran = False
+    new_approval_ids: list[uuid.UUID] = []
+    agent_reply: str | None = None
+    try:
+        from anthropic import AsyncAnthropic  # noqa: PLC0415
+
+        from app import platform_config  # noqa: PLC0415
+        from app.agents.base import run_agent  # noqa: PLC0415
+        from app.api.routes.agents import _resolve_runnable  # noqa: PLC0415
+
+        key = await platform_config.anthropic_api_key(db)
+        if key:
+            spec = await _resolve_runnable(agent_name, user, db) if agent_name else None
+            if spec is not None:
+                anthro = AsyncAnthropic(api_key=key)
+                new_task.status = "running"
+                await db.flush()
+                result = await run_agent(
+                    spec,
+                    client=anthro,
+                    db=db,
+                    task_id=new_task_id,
+                    instruction=new_instruction,
+                    client_id=client.id,
+                    project_id=project_id,
+                    owner_id=user.id,
+                    autonomy_level=client.autonomy_level,
+                )
+                new_task.status = (
+                    "awaiting_approval" if result.approval_ids else "completed"
+                )
+                new_task.output = {"text": result.text}
+                new_approval_ids = list(result.approval_ids)
+                agent_reply = result.text
+                ran = True
+    except Exception as exc:  # noqa: BLE001 — external LLM boundary
+        # The task is already created (queued); the operator can
+        # retry it via Start ▸ . Capture the error so it isn't silent.
+        new_task.status = "queued"
+        new_task.output = {"send_back_run_error": str(exc)[:500]}
+
+    await db.commit()
+    return SendBackResult(
+        rejected_approval_id=approval_id,
+        new_task_id=new_task_id,
+        ran=ran,
+        new_approval_ids=new_approval_ids,
+        agent_reply=agent_reply,
+    )
 
 
 @router.post("/batch", response_model=BatchResult)
@@ -295,5 +457,12 @@ async def batch(
                     approval_id=approval.id,
                 )
         updated.append(aid)
+    # Close out any task whose last pending approval was just decided.
+    closed_tasks: set[uuid.UUID] = set()
+    for aid in updated:
+        appr = await db.get(Approval, aid)
+        if appr is not None and appr.task_id not in closed_tasks:
+            await _close_task_if_done(appr.task_id, db)
+            closed_tasks.add(appr.task_id)
     await db.commit()
     return BatchResult(updated=updated, skipped=skipped)

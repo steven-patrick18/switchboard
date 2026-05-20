@@ -59,3 +59,25 @@ class BatchBody(BaseModel):
 class BatchResult(BaseModel):
     updated: list[uuid.UUID]
     skipped: list[uuid.UUID]
+
+
+class SendBackBody(BaseModel):
+    """Operator's correction: this approval is wrong; re-run the agent
+    with this feedback so it produces an updated draft."""
+
+    feedback: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def _strip_nonempty(self) -> "SendBackBody":
+        if not self.feedback.strip():
+            raise ValueError("feedback cannot be blank")
+        return self
+
+
+class SendBackResult(BaseModel):
+    rejected_approval_id: uuid.UUID
+    new_task_id: uuid.UUID
+    ran: bool
+    # If ran=True: the new approval(s) the agent queued on its re-run.
+    new_approval_ids: list[uuid.UUID]
+    agent_reply: str | None
