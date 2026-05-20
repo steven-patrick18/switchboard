@@ -16,9 +16,13 @@ type SystemStatus = {
   environment: string;
   agent_model: string;
   anthropic: boolean;
-  smtp: boolean;
+  smtp_configured: boolean;
   smtp_host: string | null;
+  smtp_port: number;
+  smtp_user: string | null;
+  smtp_password_set: boolean;
   smtp_from: string | null;
+  smtp_use_tls: boolean;
   app_base_url: string | null;
   documents_dir: string;
   portal_integration_backend: string;
@@ -50,6 +54,9 @@ function ReadyRow({
   );
 }
 
+const INPUT_CLS =
+  "w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-slate-500 focus:outline-none";
+
 export default function SettingsPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
@@ -57,20 +64,48 @@ export default function SettingsPage() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+
+  // Platform-config editors. Empty means "no change"; the operator
+  // types a new value into the field they want to update.
+  const [anthropicKey, setAnthropicKey] = useState("");
+  const [agentModel, setAgentModel] = useState("");
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("");
+  const [smtpUser, setSmtpUser] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [smtpFrom, setSmtpFrom] = useState("");
+  const [smtpUseTls, setSmtpUseTls] = useState(true);
+  const [appBaseUrl, setAppBaseUrl] = useState("");
+  const [testTo, setTestTo] = useState("");
+
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  async function refresh() {
+    const [u, s] = await Promise.all([
+      apiFetch<Me>("/auth/me"),
+      apiFetch<SystemStatus>("/system/status"),
+    ]);
+    setMe(u);
+    setName(u.name);
+    setStatus(s);
+    // Pre-fill non-secret fields so the operator can edit them in
+    // place instead of retyping. Secrets stay blank.
+    setAgentModel(s.agent_model ?? "");
+    setSmtpHost(s.smtp_host ?? "");
+    setSmtpPort(s.smtp_port ? String(s.smtp_port) : "");
+    setSmtpUser(s.smtp_user ?? "");
+    setSmtpFrom(s.smtp_from ?? "");
+    setSmtpUseTls(s.smtp_use_tls);
+    setAppBaseUrl(s.app_base_url ?? "");
+    setTestTo((prev) => prev || u.email);
+  }
+
   useEffect(() => {
     (async () => {
       try {
-        const [u, s] = await Promise.all([
-          apiFetch<Me>("/auth/me"),
-          apiFetch<SystemStatus>("/system/status"),
-        ]);
-        setMe(u);
-        setName(u.name);
-        setStatus(s);
+        await refresh();
       } catch (e) {
         setErr(e instanceof Error ? e.message : "Failed to load profile");
       }
@@ -130,6 +165,84 @@ export default function SettingsPage() {
     }
   }
 
+  async function savePlatformConfig(
+    payload: Record<string, string | number | boolean | null>,
+    successMsg: string,
+  ) {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      await apiFetch("/system/config", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      });
+      setMsg(successMsg);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAnthropic(e: React.FormEvent) {
+    e.preventDefault();
+    if (!anthropicKey.trim() && !agentModel.trim()) {
+      setErr("Enter an Anthropic key or a model to save.");
+      return;
+    }
+    const payload: Record<string, string> = {};
+    if (anthropicKey.trim()) payload.anthropic_api_key = anthropicKey.trim();
+    if (agentModel.trim()) payload.agent_model = agentModel.trim();
+    await savePlatformConfig(payload, "Anthropic settings saved.");
+    setAnthropicKey("");
+  }
+
+  async function clearAnthropicKey() {
+    if (!confirm) {
+      // (unused locally — the "confirm" var is for password; use window.confirm)
+    }
+    if (!window.confirm("Clear the stored Anthropic API key?")) return;
+    await savePlatformConfig(
+      { anthropic_api_key: "" },
+      "Anthropic key cleared (falling back to env if set).",
+    );
+  }
+
+  async function saveSmtp(e: React.FormEvent) {
+    e.preventDefault();
+    const payload: Record<string, string | number | boolean> = {
+      smtp_host: smtpHost.trim(),
+      smtp_user: smtpUser.trim(),
+      smtp_from: smtpFrom.trim(),
+      smtp_use_tls: smtpUseTls,
+      app_base_url: appBaseUrl.trim(),
+    };
+    if (smtpPort.trim()) payload.smtp_port = Number(smtpPort);
+    // Only send the password if the operator typed a new one.
+    if (smtpPassword.trim()) payload.smtp_password = smtpPassword.trim();
+    await savePlatformConfig(payload, "SMTP settings saved.");
+    setSmtpPassword("");
+  }
+
+  async function sendTestEmail() {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const r = await apiFetch<{ status: string }>(
+        "/system/config/test-email",
+        { method: "POST", body: JSON.stringify({ to: testTo }) },
+      );
+      setMsg(`Test email: ${r.status}`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Test failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AppShell>
       <div className="flex items-baseline justify-between">
@@ -157,11 +270,6 @@ export default function SettingsPage() {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
             Platform readiness
           </h2>
-          <p className="mt-1 text-xs text-slate-500">
-            What's configured. Set values via the deploy environment
-            (.env or your hosting platform); the platform never echoes
-            secrets back.
-          </p>
           <dl className="mt-3 grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-2">
             <ReadyRow
               label="Anthropic API key"
@@ -170,9 +278,9 @@ export default function SettingsPage() {
             />
             <ReadyRow
               label="Email notifications"
-              ok={status.smtp}
+              ok={status.smtp_configured}
               detail={
-                status.smtp
+                status.smtp_configured
                   ? `${status.smtp_host} (from ${status.smtp_from})`
                   : "operator works from the in-app badge only"
               }
@@ -198,6 +306,185 @@ export default function SettingsPage() {
           </dl>
         </section>
       )}
+
+      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Anthropic (Claude) API
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Get a key from <code>console.anthropic.com</code>. Set a monthly
+          spend cap there too. The key is stored encrypted; only its
+          presence is ever exposed back through this UI.
+        </p>
+        <form className="mt-3 space-y-3" onSubmit={saveAnthropic}>
+          <div>
+            <label className="block text-xs text-slate-500">
+              API key
+              {status?.anthropic && (
+                <span className="ml-2 rounded bg-green-100 px-1.5 py-0.5 text-xs font-semibold text-green-800">
+                  set
+                </span>
+              )}
+            </label>
+            <input
+              type="password"
+              autoComplete="off"
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder={status?.anthropic ? "•••••••• (leave blank to keep)" : "sk-ant-..."}
+              value={anthropicKey}
+              onChange={(e) => setAnthropicKey(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">
+              Default agent model
+            </label>
+            <input
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder="claude-opus-4-7"
+              value={agentModel}
+              onChange={(e) => setAgentModel(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Save Anthropic settings
+            </button>
+            {status?.anthropic && (
+              <button
+                type="button"
+                onClick={clearAnthropicKey}
+                disabled={busy}
+                className="rounded-md border border-red-300 px-4 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Clear key
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Email notifications (SMTP)
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Optional. When set, the platform emails you the moment an agent
+          queues a tier-2/3 approval. Best-effort: SMTP failures never
+          block the agent loop.
+        </p>
+        <form className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={saveSmtp}>
+          <div>
+            <label className="block text-xs text-slate-500">SMTP host</label>
+            <input
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder="smtp.gmail.com"
+              value={smtpHost}
+              onChange={(e) => setSmtpHost(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">Port</label>
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder="587"
+              value={smtpPort}
+              onChange={(e) => setSmtpPort(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">Username</label>
+            <input
+              className={`mt-1 ${INPUT_CLS}`}
+              value={smtpUser}
+              onChange={(e) => setSmtpUser(e.target.value)}
+              autoComplete="username"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500">
+              Password
+              {status?.smtp_password_set && (
+                <span className="ml-2 rounded bg-green-100 px-1.5 py-0.5 text-xs font-semibold text-green-800">
+                  set
+                </span>
+              )}
+            </label>
+            <input
+              type="password"
+              autoComplete="off"
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder={
+                status?.smtp_password_set ? "•••••••• (leave blank to keep)" : ""
+              }
+              value={smtpPassword}
+              onChange={(e) => setSmtpPassword(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-slate-500">From address</label>
+            <input
+              type="email"
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder="ops@your-company.com"
+              value={smtpFrom}
+              onChange={(e) => setSmtpFrom(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-slate-500">
+              Public app URL (for email links)
+            </label>
+            <input
+              className={`mt-1 ${INPUT_CLS}`}
+              placeholder="https://switchboard.your-company.com"
+              value={appBaseUrl}
+              onChange={(e) => setAppBaseUrl(e.target.value)}
+            />
+          </div>
+          <label className="flex items-center gap-2 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={smtpUseTls}
+              onChange={(e) => setSmtpUseTls(e.target.checked)}
+            />
+            <span className="text-sm text-slate-700">Use STARTTLS</span>
+          </label>
+          <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Save SMTP settings
+            </button>
+            <div className="flex flex-1 items-center gap-2">
+              <input
+                type="email"
+                className="flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                placeholder="test recipient"
+                value={testTo}
+                onChange={(e) => setTestTo(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={sendTestEmail}
+                disabled={busy || !status?.smtp_configured || !testTo}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                Send test email
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

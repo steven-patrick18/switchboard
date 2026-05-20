@@ -57,7 +57,7 @@ async def test_status_reflects_settings_without_leaking_secrets(client: AsyncCli
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["anthropic"] is True
-        assert body["smtp"] is True
+        assert body["smtp_configured"] is True
         assert body["smtp_host"] == "smtp.example.com"
         # Critical: secrets must never appear in the response.
         assert "LEAK-CANARY" not in r.text

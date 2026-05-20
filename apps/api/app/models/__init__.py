@@ -6,6 +6,7 @@ from app.models.client_intake import ClientIntake
 from app.models.client_link import ClientLink
 from app.models.credential import Credential
 from app.models.document import Document
+from app.models.platform_setting import PlatformSetting
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
@@ -19,6 +20,7 @@ __all__ = [
     "ClientLink",
     "Credential",
     "Document",
+    "PlatformSetting",
     "Project",
     "Task",
     "User",

@@ -237,6 +237,7 @@ async def _notify_owner_of_approval(
         return
     email, client_name = row
     await notify_approval_queued(
+        db=db,
         to=email,
         client_name=client_name,
         action_type=action_type,
