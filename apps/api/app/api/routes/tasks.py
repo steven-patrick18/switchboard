@@ -52,9 +52,20 @@ async def _execute(
     anthropic,
     db: AsyncSession,
     owner_id: uuid.UUID | None = None,
+    autonomy_level: str | None = None,
 ) -> AgentRunResponse:
     task.status = "running"
     await db.flush()
+    # Resolve autonomy at call-time if the caller didn't pass it (covers
+    # callers that haven't been updated yet). Defaults to supervised.
+    if autonomy_level is None:
+        from app.models import Client  # noqa: PLC0415
+        from app.models.client import AUTONOMY_SUPERVISED  # noqa: PLC0415
+
+        client_row = await db.get(Client, client_id)
+        autonomy_level = (
+            client_row.autonomy_level if client_row is not None else AUTONOMY_SUPERVISED
+        )
     result = await run_agent(
         spec,
         client=anthropic,
@@ -64,6 +75,7 @@ async def _execute(
         client_id=client_id,
         project_id=project.id,
         owner_id=owner_id,
+        autonomy_level=autonomy_level,
     )
     task.status = "awaiting_approval" if result.approval_ids else "completed"
     task.output = {"text": result.text}

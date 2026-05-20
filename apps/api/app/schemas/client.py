@@ -17,6 +17,7 @@ class ClientUpdate(BaseModel):
     state: str | None = Field(default=None, min_length=2, max_length=2)
     stage: str | None = Field(default=None, max_length=64)
     playbook_id: str | None = Field(default=None, max_length=64)
+    autonomy_level: str | None = Field(default=None, max_length=32)
 
 
 class ClientOut(BaseModel):
@@ -28,4 +29,5 @@ class ClientOut(BaseModel):
     state: str | None
     stage: str
     playbook_id: str | None
+    autonomy_level: str
     created_at: datetime

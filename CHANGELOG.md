@@ -6,6 +6,62 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.8 — Per-client autonomous mode (~85% hands-off) · 2026-05-20
+
+### Added — `autonomy_level` per client: supervised | autonomous
+Until now every regulated/external action queued for operator
+approval — both T2 (carrier portals, client emails, internal
+look-ups) and T3 (FCC filings under penalty of perjury,
+e-signatures). That's safe but high-friction once you trust the
+agent loop.
+
+New per-client `autonomy_level` setting on the **client page** lets
+you opt in to a hands-off mode:
+
+- **`supervised`** (default, original behavior) — every T2 + T3
+  action queues. Operator decides each one.
+- **`autonomous`** — T2 actions auto-execute. An `Approval` row
+  is still created (`decision='approved'`, `note='autonomous mode'`)
+  and the executor runs immediately so the forensic trail is
+  intact. **T3 still queues regardless** — that's the legal floor
+  (filings under penalty of perjury, e-signatures) and is
+  intentionally not bypassable via this flag.
+
+In practice T0 + T1 + T2 ≈ 85% of all tool calls, so flipping a
+client to autonomous gets you ~85% hands-off with the legal floor
+preserved.
+
+### Surface
+- Migration `0015` adds `clients.autonomy_level` (string, default
+  `supervised`, NOT NULL).
+- `PATCH /clients/{id}` now accepts `autonomy_level`; switching
+  modes emits a `client.autonomy_changed` audit row with before
+  + after so any change is forensically recorded.
+- `run_agent` gains an `autonomy_level` parameter (default
+  `supervised`). The agents.py and tasks.py routes thread it
+  through from the client row.
+- When `autonomy_level=='autonomous'` and a T2 tool fires:
+  `Approval(decision=approved, note='autonomous mode')` →
+  `execute_approval` runs immediately → audit row
+  `approval.auto_executed` (actor: `'{agent} (autonomous)'`).
+- T3 path is unchanged — always queues.
+
+### Frontend
+- Card at the top of the client page shows the current mode + a
+  one-click toggle.
+- Switching to autonomous shows a `confirm()` dialog spelling out
+  what changes and what stays gated.
+- "AUTONOMOUS" pill next to `stage:` in the header when on.
+
+### Tests (`tests/test_autonomy_mode.py`)
+- Supervised mode still queues T2 (regression baseline).
+- Autonomous mode T2 → executes + Approval row recorded as
+  approved + audit row `approval.auto_executed`.
+- Autonomous mode T3 → still pending. Hard assertion that the
+  legal floor holds.
+
+121 tests passing.
+
 ## v1.3.7 — Live activity page · 2026-05-20
 
 ### Added — Cross-client live view of every agent

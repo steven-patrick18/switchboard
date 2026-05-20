@@ -395,6 +395,7 @@ async def run(
         client_id=client_row.id,
         project_id=project.id,
         owner_id=user.id,
+        autonomy_level=client_row.autonomy_level,
     )
 
     task.status = "awaiting_approval" if result.approval_ids else "completed"

@@ -8,8 +8,15 @@ from app.agent_learning import fetch_recent_lessons, format_lessons_block
 from app.agents.tools import AUTO_TIERS, GATED_TIERS, Tool, ToolContext
 from app.audit import record_audit
 from app.config import settings
+from app.execution import execute_approval
 from app.models.agent_run import AgentRun
-from app.models.approval import DECISION_PENDING, Approval
+from app.models.approval import (
+    DECISION_APPROVED,
+    DECISION_PENDING,
+    TIER_APPROVE,
+    Approval,
+)
+from app.models.client import AUTONOMY_AUTONOMOUS, AUTONOMY_SUPERVISED
 from app.notifications import notify_approval_queued
 
 # USD per 1M tokens (input, output). Cache reads ~0.1x, writes ~1.25x.
@@ -67,9 +74,18 @@ async def run_agent(
     client_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
     owner_id: uuid.UUID | None = None,
+    autonomy_level: str = AUTONOMY_SUPERVISED,
 ) -> RunResult:
-    """Manual agentic loop. Every T2/T3 tool call is intercepted and lands
-    in the approval queue instead of executing — the queue is the product."""
+    """Manual agentic loop. Every T2/T3 tool call is intercepted.
+
+    Default (supervised) mode: BOTH T2 and T3 queue for operator approval —
+    nothing executes until a human signs off.
+
+    Autonomous mode (`autonomy_level='autonomous'`): T2 actions auto-execute
+    (an Approval row is still created with decision='approved' so the
+    forensic trail is complete). T3 (filings under penalty of perjury,
+    e-signatures) ALWAYS queues — that's the legal floor and cannot be
+    bypassed by this flag."""
 
     model = spec.model or settings.agent_model
     ctx = ToolContext(
@@ -161,6 +177,53 @@ async def run_agent(
                     }
                 )
             elif tool.tier in GATED_TIERS:
+                # Autonomous mode auto-executes T2 only. T3 (filings +
+                # signatures) is the legal floor — always queues.
+                auto_execute = (
+                    autonomy_level == AUTONOMY_AUTONOMOUS
+                    and tool.tier == TIER_APPROVE
+                    and client_id is not None
+                )
+                if auto_execute:
+                    approval = Approval(
+                        task_id=task_id,
+                        action_type=tool.name,
+                        tier=tool.tier,
+                        payload=dict(block.input),
+                        decision=DECISION_APPROVED,
+                        note="autonomous mode (no human approval)",
+                    )
+                    db.add(approval)
+                    await db.flush()
+                    exec_result = await execute_approval(approval, client_id, db)
+                    from datetime import UTC, datetime  # noqa: PLC0415
+
+                    approval.executed_at = datetime.now(UTC)
+                    approval.execution_result = exec_result[:2000]
+                    await record_audit(
+                        db,
+                        actor=f"{spec.name} (autonomous)",
+                        action="approval.auto_executed",
+                        subject=f"approval:{approval.id}",
+                        client_id=client_id,
+                        after={
+                            "tier": tool.tier,
+                            "payload": dict(block.input),
+                            "result": exec_result[:500],
+                        },
+                    )
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": (
+                                f"Executed under autonomous mode "
+                                f"(approval {approval.id} recorded). "
+                                f"Result: {exec_result}"
+                            ),
+                        }
+                    )
+                    continue
                 approval = Approval(
                     task_id=task_id,
                     action_type=tool.name,

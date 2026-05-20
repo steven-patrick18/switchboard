@@ -56,7 +56,12 @@ type Task = {
   output: { text?: string } | null;
   created_at: string;
 };
-type ClientMeta = { id: string; name: string; stage: string };
+type ClientMeta = {
+  id: string;
+  name: string;
+  stage: string;
+  autonomy_level: "supervised" | "autonomous";
+};
 type Audit = {
   id: string;
   ts: string;
@@ -582,6 +587,11 @@ export default function ClientDetailPage() {
           {meta && (
             <p className="mt-1 text-xs uppercase tracking-wide text-slate-500">
               stage: {meta.stage}
+              {meta.autonomy_level === "autonomous" && (
+                <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-emerald-800">
+                  autonomous
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -613,6 +623,91 @@ export default function ClientDetailPage() {
         <p className="mt-4 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-800 shadow-sm">
           {msg}
         </p>
+      )}
+
+      {/* Autonomy mode */}
+      {meta && (
+        <section
+          className={
+            "mt-6 rounded-md border p-4 text-sm " +
+            (meta.autonomy_level === "autonomous"
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-slate-200 bg-white")
+          }
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-semibold text-slate-900">
+                Autonomy mode:{" "}
+                <span className="font-mono">{meta.autonomy_level}</span>
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                {meta.autonomy_level === "autonomous" ? (
+                  <>
+                    Agents take <strong>tier-2 actions</strong> (carrier
+                    portals, client emails, internal lookups) without
+                    waiting for your approval — they self-serve and the
+                    Approval row is auto-recorded for the audit trail.{" "}
+                    <strong>Tier-3 still queues</strong>: FCC filings
+                    under penalty of perjury and e-signatures always
+                    wait for your sign-off — that&apos;s the legal floor
+                    and cannot be bypassed.
+                  </>
+                ) : (
+                  <>
+                    Every regulated action (T2 + T3) queues for your
+                    approval — the original supervised behavior. Switch
+                    to autonomous to let agents self-serve on T2 only;
+                    T3 (filings + signatures) always queues regardless.
+                  </>
+                )}
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                const next =
+                  meta.autonomy_level === "autonomous"
+                    ? "supervised"
+                    : "autonomous";
+                if (
+                  next === "autonomous" &&
+                  !confirm(
+                    "Switch to AUTONOMOUS mode? Agents will take tier-2 actions (carrier portals, client emails) WITHOUT your approval. " +
+                      "Tier-3 filings + e-signatures still queue. You can switch back at any time.",
+                  )
+                )
+                  return;
+                try {
+                  const updated = await apiFetch<ClientMeta>(
+                    `/clients/${id}`,
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({ autonomy_level: next }),
+                    },
+                  );
+                  setMeta(updated);
+                  setMsg(`Autonomy mode set to "${updated.autonomy_level}".`);
+                } catch (e) {
+                  setMsg(
+                    e instanceof Error
+                      ? e.message
+                      : "Failed to change autonomy mode",
+                  );
+                }
+              }}
+              className={
+                "rounded-md px-3 py-1.5 text-xs font-medium " +
+                (meta.autonomy_level === "autonomous"
+                  ? "border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100"
+                  : "bg-slate-900 text-white hover:bg-slate-800")
+              }
+            >
+              {meta.autonomy_level === "autonomous"
+                ? "Switch to supervised"
+                : "Switch to autonomous ▸"}
+            </button>
+          </div>
+        </section>
       )}
 
       {/* Intake */}
