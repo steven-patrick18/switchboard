@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, downloadFile, previewFile } from "@/lib/api";
+
+export type EmailAttachment = {
+  document_id: string;
+  filename: string;
+  mime: string | null;
+  size_bytes: number | null;
+};
 
 export type EmailPacket = {
   to: string;
@@ -11,6 +18,7 @@ export type EmailPacket = {
   body: string;
   cc: string[] | null;
   attachments_note: string | null;
+  attachments?: EmailAttachment[];
 };
 
 export type Approval = {
@@ -550,6 +558,64 @@ export default function ApprovalCard({
                   {initialPacket.attachments_note}
                 </p>
               )}
+              {initialPacket.attachments &&
+                initialPacket.attachments.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-semibold text-slate-600">
+                      Generated PDFs (attached to the email when you Send):
+                    </p>
+                    <ul className="mt-1 space-y-1">
+                      {initialPacket.attachments.map((a) => (
+                        <li
+                          key={a.document_id}
+                          className="flex items-center gap-3 rounded-md border border-slate-200 bg-white p-2 text-xs"
+                        >
+                          <span className="font-mono">📎 {a.filename}</span>
+                          {a.size_bytes ? (
+                            <span className="text-slate-500">
+                              {(a.size_bytes / 1024).toFixed(1)} KB
+                            </span>
+                          ) : null}
+                          <span className="ml-auto flex gap-2">
+                            <button
+                              onClick={() =>
+                                previewFile(
+                                  `/clients/${approval.client_id}/documents/${a.document_id}/download`,
+                                ).catch((e) =>
+                                  setErr(
+                                    e instanceof Error
+                                      ? e.message
+                                      : "Preview failed",
+                                  ),
+                                )
+                              }
+                              className="text-slate-700 underline"
+                            >
+                              preview ↗
+                            </button>
+                            <button
+                              onClick={() =>
+                                downloadFile(
+                                  `/clients/${approval.client_id}/documents/${a.document_id}/download?dl=1`,
+                                  a.filename,
+                                ).catch((e) =>
+                                  setErr(
+                                    e instanceof Error
+                                      ? e.message
+                                      : "Download failed",
+                                  ),
+                                )
+                              }
+                              className="text-slate-700 underline"
+                            >
+                              download ↓
+                            </button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   onClick={sendEmail}

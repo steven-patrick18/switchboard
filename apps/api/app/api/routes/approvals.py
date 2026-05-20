@@ -422,7 +422,9 @@ async def send_email_for_approval(
     inbound replies back to the same approval. Audited as
     `approval.emailed`. Fails gracefully with a 400 if SMTP isn't
     configured — the UI can then fall back to its copy-paste path."""
+    from app.models import Document  # noqa: PLC0415
     from app.notifications import send_email_now, send_via_client_smtp  # noqa: PLC0415
+    from app.storage import read_bytes  # noqa: PLC0415
 
     approval, client = await _load_owned(approval_id, user, db)
     packet = approval.email_packet or {}
@@ -443,6 +445,28 @@ async def send_email_for_approval(
             detail=f"Recipient is still a placeholder ({to}); override 'to' in the request.",
         )
 
+    # Load attachment bytes from the Document Hub. Filings live here
+    # content-addressed; we ship them inline with the email so the
+    # regulator gets the actual PDFs (not just prose).
+    attachments: list[tuple[str, bytes, str]] = []
+    for ref in packet.get("attachments") or []:
+        if not isinstance(ref, dict):
+            continue
+        try:
+            doc_id = uuid.UUID(str(ref.get("document_id")))
+        except (TypeError, ValueError):
+            continue
+        doc = await db.get(Document, doc_id)
+        if doc is None or doc.client_id != client.id or not doc.s3_key:
+            continue
+        try:
+            data = read_bytes(doc.s3_key)
+        except OSError:
+            continue
+        attachments.append(
+            (doc.filename or f"{doc.type}.bin", data, doc.mime or "application/pdf")
+        )
+
     if body.via == "client":
         sent, message_id, error = await send_via_client_smtp(
             db,
@@ -452,6 +476,7 @@ async def send_email_for_approval(
             subject=subject,
             body=body_text,
             cc=cc,
+            attachments=attachments,
         )
         sender_path = "client"
     else:

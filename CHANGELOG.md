@@ -6,6 +6,77 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.18 — Approved filings ship REAL PDFs (with attachments) · 2026-05-20
+
+### Fixed — "no file" Documents are gone
+Before today, approving a filing recorded a `Document` row in the
+Document Hub with `s3_key=None` — the row existed for audit but no
+actual file bytes were behind it. The email packet's "Attachments:"
+line listed file names that didn't exist. The operator had nothing
+real to mail to NECA/FCC.
+
+### Added — per-form PDF builders (`app/pdf_builders.py`)
+- `build_neca_ocn_2_pdf(payload, legal_name)` — full NECA-OCN-2
+  application: applicant section, service request, authorized
+  officer, operational contact, certification block
+- `build_letter_of_agency_pdf(payload, legal_name)` — LOA with
+  parties, scope, effective dates, signature line
+- `build_generic_filing_pdf(form, payload, legal_name)` — fallback
+  key/value dump so non-templated filings (FCC 499, RMD, etc.) still
+  produce a usable PDF; dedicated templates can be added per-form
+  later without touching the executor
+
+### Executor pipeline
+When `_execute_filing` runs:
+1. Pick the right builder for the form
+2. Render the PDF(s) to bytes (NECA-OCN-2 yields **two** — the
+   form itself + the LOA; other forms yield one)
+3. Persist via content-addressed `app/storage.py` (re-runs of the
+   same approved payload de-dupe to the same file on disk)
+4. Create a Document row per PDF with real `s3_key`, `filename`,
+   `mime=application/pdf`, `size_bytes` populated
+5. Write `[{document_id, filename, mime, size_bytes}, ...]` into
+   `Approval.email_packet.attachments` so the UI + send path can
+   find them
+
+### `/approvals/{id}/send-email` now ships the bytes
+The endpoint loads each attachment from storage (owner-scoped via
+`Document.client_id == client.id`) and passes them to the SMTP send
+as MIME parts. The regulator gets real PDFs, not just prose.
+
+### Approval card UI
+Below the "Attachments:" note in the email packet section, a new
+file list renders:
+```
+📎 NECA-OCN-2__Amano_Telecom_LLC__v1.pdf   12.4 KB   preview ↗ download ↓
+📎 NECA-OCN-2-LOA__Amano_Telecom_LLC__v1.pdf  6.1 KB  preview ↗ download ↓
+```
+- **preview ↗** opens the PDF inline in a new tab so the operator
+  can verify the rendered form before clicking Send. Uses a new
+  `previewFile()` helper in `lib/api.ts` that auth-fetches then
+  spawns a blob URL (plain `<a href>` would 401 — the API requires
+  the Bearer token).
+- **download ↓** triggers a normal file save.
+
+### Backend download endpoint supports inline
+`GET /clients/{id}/documents/{doc_id}/download` now accepts `?dl=1`
+to force `Content-Disposition: attachment`. The default is `inline`
+so the browser's native PDF viewer can render in a new tab.
+
+### Tests (`tests/test_pdf_attachments.py`, 6 new)
+- `build_neca_ocn_2_pdf` produces a valid `%PDF-…` byte stream > 1KB
+- `build_letter_of_agency_pdf` ditto
+- `build_generic_filing_pdf` handles nested payload values
+- Executor for NECA-OCN-2 creates **two** Document rows with real
+  bytes and links both into `email_packet.attachments`
+- Executor for FCC 499-A (generic path) creates **one** Document
+  row with real bytes — regression guard against the "no file" bug
+- `/send-email` HTTP test: approve → executor populates the packet
+  → call `/send-email` → mock confirms SMTP send was invoked with
+  two PDF attachments, each starting with `%PDF-`
+
+164 tests passing.
+
 ## v1.3.17 — Approval queue: filter Pending / Decided / All · 2026-05-20
 
 ### Fixed — operators can finally find decided approvals

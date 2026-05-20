@@ -275,10 +275,16 @@ async def export_client_zip(
 async def download_document(
     client_id: uuid.UUID,
     doc_id: uuid.UUID,
+    dl: int = 0,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """Stream back the uploaded bytes. Owner-scoped via _owned_client."""
+    """Stream back the uploaded bytes. Owner-scoped via _owned_client.
+
+    Pass `?dl=1` to force a download (Content-Disposition: attachment).
+    Default (no query) is inline so the browser can preview PDFs/images
+    in a new tab — useful for verifying a generated NECA-OCN-2 packet
+    before emailing it out."""
     await _owned_client(client_id, user, db)
     doc = await db.get(Document, doc_id)
     if doc is None or doc.client_id != client_id:
@@ -298,10 +304,11 @@ async def download_document(
             detail="Document bytes missing from storage.",
         ) from None
     filename = doc.filename or f"{doc.type}-v{doc.version}"
+    disposition = "attachment" if dl else "inline"
     return Response(
         content=data,
         media_type=doc.mime or "application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
     )
 
 

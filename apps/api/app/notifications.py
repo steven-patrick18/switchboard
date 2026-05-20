@@ -110,10 +110,16 @@ def _send_via_client_sync(
     subject: str,
     body: str,
     cc: list[str] | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> str:
     """Open the CLIENT's SMTP server and send. Port 465 uses implicit
     SSL; everything else uses STARTTLS. Returns the Message-ID so the
-    Approval row can record it for later inbound-reply matching."""
+    Approval row can record it for later inbound-reply matching.
+
+    `attachments` is a list of (filename, bytes, mime) — the filings the
+    operator is delivering to the agency (NECA-OCN-2.pdf, signed LOA,
+    etc.). The regulator needs these inline; they are the entire point
+    of the message."""
     import ssl  # noqa: PLC0415
 
     msg = EmailMessage()
@@ -123,6 +129,17 @@ def _send_via_client_sync(
         msg["Cc"] = ", ".join(cc)
     msg["Subject"] = subject
     msg.set_content(body)
+    for filename, data, mime in attachments or []:
+        # Split the mime "type/subtype" → set_content's add_attachment
+        # takes maintype + subtype separately.
+        m = (mime or "application/octet-stream").split("/", 1)
+        if len(m) == 2:
+            maintype, subtype = m
+        else:
+            maintype, subtype = "application", "octet-stream"
+        msg.add_attachment(
+            data, maintype=maintype, subtype=subtype, filename=filename
+        )
     if port == 465 and not use_tls:
         # Implicit SSL — connect with SMTP_SSL.
         ctx = ssl.create_default_context()
@@ -147,6 +164,7 @@ async def send_via_client_smtp(
     subject: str,
     body: str,
     cc: list[str] | None = None,
+    attachments: list[tuple[str, bytes, str]] | None = None,
 ) -> tuple[bool, str | None, str | None]:
     """Send a filing email FROM THE CLIENT's address using their stored
     `client_email` credential. Returns (sent, message_id, error_text).
@@ -179,6 +197,7 @@ async def send_via_client_smtp(
             subject=subject,
             body=body,
             cc=cc,
+            attachments=attachments,
         )
         return True, mid or None, None
     except Exception as exc:  # noqa: BLE001 — external SMTP boundary

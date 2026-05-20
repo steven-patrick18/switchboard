@@ -47,6 +47,21 @@ export async function downloadFile(
   URL.revokeObjectURL(url);
 }
 
+export async function previewFile(path: string): Promise<void> {
+  // Open the bytes in a new tab so the browser's native PDF/image
+  // viewer can render them inline. We have to fetch-with-auth first
+  // because plain <a href> would 401 — the API requires the Bearer
+  // header. The blob URL is short-lived; the browser holds onto it
+  // for the lifetime of the spawned tab.
+  const blob = await fetchBlob(path);
+  const url = URL.createObjectURL(blob);
+  const tab = window.open(url, "_blank", "noopener,noreferrer");
+  if (!tab) {
+    // Popup blocked — fall back to a same-tab navigation.
+    window.location.href = url;
+  }
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},

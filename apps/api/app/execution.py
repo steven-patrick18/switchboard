@@ -18,6 +18,12 @@ from app.models.approval import Approval
 from app.models.client_intake import ClientIntake
 from app.models.credential import Credential
 from app.models.document import Document
+from app.pdf_builders import (
+    build_generic_filing_pdf,
+    build_letter_of_agency_pdf,
+    build_neca_ocn_2_pdf,
+)
+from app.storage import store_bytes
 
 
 async def _next_version(db: AsyncSession, client_id: uuid.UUID, doc_type: str) -> int:
@@ -69,24 +75,121 @@ async def _client_from_address(db: AsyncSession, client_id: uuid.UUID) -> str:
     return "[client email — add a 'client_email' credential in the vault]"
 
 
+async def _persist_pdf(
+    db: AsyncSession,
+    *,
+    client_id: uuid.UUID,
+    doc_type: str,
+    filename: str,
+    data: bytes,
+) -> Document:
+    """Content-address the PDF bytes, register a Document row pointing
+    at the on-disk artifact, and return it. Versioning matches the
+    rest of the Document Hub — bumping each time we regenerate."""
+    sha, size = store_bytes(data)
+    version = await _next_version(db, client_id, doc_type)
+    doc = Document(
+        client_id=client_id,
+        type=doc_type,
+        version=version,
+        s3_key=sha,
+        filename=filename,
+        mime="application/pdf",
+        size_bytes=size,
+    )
+    db.add(doc)
+    await db.flush()
+    return doc
+
+
+def _pdf_filename(form: str, legal_name: str | None, version: int) -> str:
+    """Sanitize for a filesystem-safe attachment name without losing
+    enough context that the operator can identify it."""
+    base = (legal_name or "client").strip()
+    safe_name = "".join(
+        c if c.isalnum() or c in "-_." else "_" for c in base
+    ).strip("_") or "client"
+    safe_form = "".join(
+        c if c.isalnum() or c in "-_." else "_" for c in form
+    ).strip("_") or "filing"
+    return f"{safe_form}__{safe_name}__v{version}.pdf"
+
+
 async def _execute_filing(
     approval: Approval, client_id: uuid.UUID, db: AsyncSession
 ) -> str:
     payload = approval.payload or {}
     form = str(payload.get("form") or "filing")
-    version = await _next_version(db, client_id, form)
-    doc = Document(client_id=client_id, type=form, version=version)
-    db.add(doc)
-    await db.flush()
-    approval.result_document_id = doc.id
-    # Build the prefilled email packet so the operator can one-click
-    # send (or copy-paste) the filing to NECA / USAC / state PUC.
-    # IMPORTANT: From line is the CLIENT, not Switchboard — regulators
-    # expect chain-of-custody. The SMTP login itself uses the client's
-    # stored credential at send time.
     legal_name, ein, _ = await _intake_for(db, client_id)
+
+    # Generate the actual PDF(s) the operator will mail to the agency.
+    # Picks the right builder per form; everything else falls back to
+    # a generic key/value dump so we never end up with a Document Hub
+    # stub with no file behind it.
+    attachments: list[dict] = []
+    fkey = form.lower()
+    if fkey.startswith("neca-ocn"):
+        # NECA-OCN-2 is a two-document package: the form + the LOA.
+        ocn_pdf = build_neca_ocn_2_pdf(payload, legal_name)
+        ocn_doc = await _persist_pdf(
+            db,
+            client_id=client_id,
+            doc_type=form,
+            filename=_pdf_filename(form, legal_name, 1),
+            data=ocn_pdf,
+        )
+        # The LOA filename derives from the form name so they group
+        # cleanly in the Document Hub listing.
+        loa_pdf = build_letter_of_agency_pdf(payload, legal_name)
+        loa_doc = await _persist_pdf(
+            db,
+            client_id=client_id,
+            doc_type=f"{form}__LOA",
+            filename=_pdf_filename(f"{form}-LOA", legal_name, 1),
+            data=loa_pdf,
+        )
+        approval.result_document_id = ocn_doc.id
+        attachments = [
+            {
+                "document_id": str(ocn_doc.id),
+                "filename": ocn_doc.filename,
+                "mime": ocn_doc.mime,
+                "size_bytes": ocn_doc.size_bytes,
+            },
+            {
+                "document_id": str(loa_doc.id),
+                "filename": loa_doc.filename,
+                "mime": loa_doc.mime,
+                "size_bytes": loa_doc.size_bytes,
+            },
+        ]
+    else:
+        # FCC 499 / RMD / Section 214 / etc. — generic dump for now;
+        # add dedicated builders as each form gets templated.
+        generic_pdf = build_generic_filing_pdf(form, payload, legal_name)
+        gen_doc = await _persist_pdf(
+            db,
+            client_id=client_id,
+            doc_type=form,
+            filename=_pdf_filename(form, legal_name, 1),
+            data=generic_pdf,
+        )
+        approval.result_document_id = gen_doc.id
+        attachments = [
+            {
+                "document_id": str(gen_doc.id),
+                "filename": gen_doc.filename,
+                "mime": gen_doc.mime,
+                "size_bytes": gen_doc.size_bytes,
+            },
+        ]
+
+    # Build the prefilled email packet so the operator can one-click
+    # send (or copy-paste) the filing. IMPORTANT: From line is the
+    # CLIENT, not Switchboard. The packet now carries attachment IDs
+    # so /send-email can read the bytes and attach them.
     from_address = await _client_from_address(db, client_id)
-    approval.email_packet = build_email_packet(
+    packet = build_email_packet(
         form=form,
         payload=payload,
         legal_name=legal_name,
@@ -94,11 +197,18 @@ async def _execute_filing(
         from_address=from_address,
         summary=str(payload.get("summary") or ""),
     ).to_json()
+    packet["attachments"] = attachments
+    approval.email_packet = packet
+
+    primary_doc = await db.get(Document, approval.result_document_id)
+    primary_version = primary_doc.version if primary_doc else 1
+    file_summary = ", ".join(a["filename"] for a in attachments)
     return (
-        f"Recorded {form} (v{version}) in the Document Hub. The external "
-        f"submission to FCC is performed by the integration layer (not yet "
-        f"wired) — this is the tracked internal artifact. A ready-to-send "
-        f"email packet is attached to this approval."
+        f"Recorded {form} (v{primary_version}) in the Document Hub with "
+        f"{len(attachments)} PDF attachment(s): {file_summary}. Email "
+        f"packet ready to send from the client's address. The external "
+        f"submission to the agency is performed by the operator (or, "
+        f"later, the integration layer)."
     )
 
 
