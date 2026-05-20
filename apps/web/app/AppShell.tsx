@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/workspaces", label: "Workspaces" },
   { href: "/approvals", label: "Approval queue" },
+  { href: "/activity", label: "Live activity" },
   { href: "/history", label: "History" },
   { href: "/agents", label: "AI Agents" },
   { href: "/settings", label: "Settings" },

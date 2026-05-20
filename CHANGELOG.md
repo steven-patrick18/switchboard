@@ -6,6 +6,46 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.7 — Live activity page · 2026-05-20
+
+### Added — Cross-client live view of every agent
+The operator could see what one client's agents were doing on that
+client's page, but there was no single place to answer "what is
+every one of my agents doing right now?" — especially when more
+than one client is mid-launch.
+
+New page **/activity** in the sidebar (between Approval queue and
+History). Polls every 5 seconds and shows four feeds:
+
+1. **Running now** — tasks where `status='running'` (an agent loop
+   is actively executing tools). Links straight through to the
+   client page.
+2. **Awaiting your approval** — tasks paused with one or more
+   queued approvals. Each row has a direct link to the queue.
+3. **Who's working on what** — application rows an agent has
+   claimed via `update_application_stage`. Pulled from
+   `Application.current_agent` + `stage in {in_progress,
+   awaiting_approval, blocked}`. Shows the self-reported note so
+   you can see, e.g., "carrier is drafting NECA-OCN-2 with the
+   attached LOA."
+4. **Recent agent runs** — last 30 `AgentRun` rows operator-wide,
+   with duration, tokens in/out, and per-run spend.
+
+Six headline tiles at the top: running, awaiting approval, active
+assignments, runs in 24h, tokens in 24h, cost in 24h.
+
+Backend: new `GET /activity` route (`app/api/routes/activity.py`),
+operator-scoped (filters every section by `Client.owner_id`). Two
+tests in `test_activity.py` lock in the contract: shape +
+operator isolation.
+
+Pause/Resume button on the page so the operator can freeze the
+view (e.g. to copy a note out). Pause stops the polling timer;
+Resume restarts it on the next tick.
+
+No migration. The data already existed — this page just makes it
+visible at the operator level.
+
 ## v1.3.6 — Carrier agent owns OCN end-to-end · 2026-05-20
 
 ### Fixed — Carrier agent no longer punts OCN to compliance
