@@ -31,6 +31,12 @@ class Credential(Base):
     service: Mapped[str] = mapped_column(String(64))
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     secret_ciphertext: Mapped[str] = mapped_column(String(4000))
+    # Login URL the agent / operator opens to use this credential.
+    # Some services have a canonical URL (FCC CORES, USAC E-File);
+    # custom carrier portals and domain webmail need the operator to
+    # provide it. The portal_actions catalog can also populate a
+    # default per-service URL for known services.
+    url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

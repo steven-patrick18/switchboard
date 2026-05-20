@@ -6,6 +6,42 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.3 — Credential URL + edit-in-place · 2026-05-20
+
+### Added — URL field on every credential
+- Each stored credential now carries an optional **login URL** so
+  the agent and operator know exactly where to use the credential
+  (especially for domain webmail and custom carrier portals where
+  the URL isn't obvious).
+- **Known services auto-fill**: if the operator doesn't supply a
+  URL but the service name is in the well-known table (`fcc_cores`,
+  `usac_efile`, `neca`, `stipa`/`iconectiv`, `rmd`, `irs_eftps`,
+  `twilio`, `telnyx`, `bandwidth`, `inteliquent`), the URL gets
+  populated automatically — no typing for the obvious cases.
+- Each credential row renders an **open ↗** link if a URL is set;
+  clicking opens the login page in a new tab.
+
+### Added — Edit existing credentials
+- New **edit** button per credential row drops in an inline form
+  to update username, URL, or rotate the password — without
+  affecting the other fields. Patching is field-level: only the
+  keys you send are touched; the rest stay as-is.
+- New `PATCH /clients/{id}/credentials/{credential_id}` endpoint
+  with the same audit treatment as upsert. The audit log records
+  WHICH fields changed (e.g. `{"url": "set", "secret": "rotated"}`)
+  but never the secret value itself; a canary test asserts that.
+- Owner-scoped — non-owners get 404 on PATCH.
+
+### Wired
+- `app/vault.py::update_credential` is the new metadata-only edit
+  helper (uses `...` sentinels to distinguish "leave field alone"
+  from "clear field to NULL").
+- Operator + client-portal credential forms both grew a URL input
+  so a magic-link client can include the login URL when uploading
+  a portal credential.
+
+113 backend tests pass; tsc clean.
+
 ## v1.3.2 — Founder docs go optional + stage-aware required fields · 2026-05-20
 
 ### Changed — Founder-stage onboarding is no longer a wall

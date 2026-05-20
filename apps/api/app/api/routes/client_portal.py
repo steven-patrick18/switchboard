@@ -312,6 +312,7 @@ async def add_credential(
         username=body.username,
         scope=body.scope,
         expires_at=body.expires_at,
+        url=body.url,
     )
     await record_audit(
         db,

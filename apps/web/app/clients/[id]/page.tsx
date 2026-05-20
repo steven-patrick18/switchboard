@@ -43,6 +43,8 @@ type Cred = {
   id: string;
   service: string;
   username: string | null;
+  url: string | null;
+  scope: string | null;
   expires_at: string | null;
   last_accessed_at: string | null;
 };
@@ -397,8 +399,16 @@ export default function ClientDetailPage() {
   const [credForm, setCredForm] = useState({
     service: "",
     username: "",
+    url: "",
     secret: "",
   });
+  // Inline edit-in-place state for an existing credential row.
+  const [credEdit, setCredEdit] = useState<{
+    id: string;
+    username: string;
+    url: string;
+    new_secret: string;
+  } | null>(null);
   const [docType, setDocType] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
@@ -857,40 +867,141 @@ export default function ClientDetailPage() {
           {creds.length === 0 && (
             <li className="p-3 text-sm text-slate-500">No credentials yet.</li>
           )}
-          {creds.map((c) => (
-            <li key={c.id} className="flex items-center justify-between p-3 text-sm">
-              <span>
-                <span className="font-medium">{c.service}</span>
-                {c.username && (
-                  <span className="ml-2 text-slate-500">({c.username})</span>
-                )}
-              </span>
-              <span className="flex items-center gap-3">
-                {c.expires_at && (
-                  <span className="text-xs text-slate-500">
-                    expires {new Date(c.expires_at).toLocaleDateString()}
+          {creds.map((c) => {
+            const editing = credEdit?.id === c.id;
+            return (
+              <li key={c.id} className="p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="font-medium">{c.service}</span>
+                    {c.username && (
+                      <span className="ml-2 text-slate-500">({c.username})</span>
+                    )}
+                    {c.url && (
+                      <a
+                        href={c.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 text-xs text-slate-600 underline underline-offset-2 hover:text-slate-900"
+                        title={c.url}
+                      >
+                        open ↗
+                      </a>
+                    )}
                   </span>
+                  <span className="flex items-center gap-3">
+                    {c.expires_at && (
+                      <span className="text-xs text-slate-500">
+                        expires {new Date(c.expires_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        setCredEdit(
+                          editing
+                            ? null
+                            : {
+                                id: c.id,
+                                username: c.username ?? "",
+                                url: c.url ?? "",
+                                new_secret: "",
+                              },
+                        )
+                      }
+                      className="text-xs text-slate-700 underline"
+                    >
+                      {editing ? "close" : "edit"}
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        act(
+                          () =>
+                            apiFetch(`/clients/${id}/credentials/${c.id}`, {
+                              method: "DELETE",
+                            }),
+                          `Removed ${c.service}.`,
+                        )
+                      }
+                      className="text-xs text-red-600 underline"
+                    >
+                      delete
+                    </button>
+                  </span>
+                </div>
+                {editing && credEdit && (
+                  <div className="mt-3 grid grid-cols-1 gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2">
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                      placeholder="Username"
+                      value={credEdit.username}
+                      onChange={(e) =>
+                        setCredEdit({ ...credEdit, username: e.target.value })
+                      }
+                    />
+                    <input
+                      className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                      placeholder="Login URL (e.g. https://...)"
+                      value={credEdit.url}
+                      onChange={(e) =>
+                        setCredEdit({ ...credEdit, url: e.target.value })
+                      }
+                    />
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      className="rounded-md border border-slate-300 px-3 py-1.5 text-sm sm:col-span-2"
+                      placeholder="New password (leave blank to keep current)"
+                      value={credEdit.new_secret}
+                      onChange={(e) =>
+                        setCredEdit({
+                          ...credEdit,
+                          new_secret: e.target.value,
+                        })
+                      }
+                    />
+                    <div className="flex gap-2 sm:col-span-2">
+                      <button
+                        disabled={busy}
+                        onClick={() => {
+                          const patch: Record<string, string | null> = {
+                            username: credEdit.username || null,
+                            url: credEdit.url || null,
+                          };
+                          if (credEdit.new_secret) {
+                            patch.new_secret = credEdit.new_secret;
+                          }
+                          act(
+                            () =>
+                              apiFetch(
+                                `/clients/${id}/credentials/${c.id}`,
+                                {
+                                  method: "PATCH",
+                                  body: JSON.stringify(patch),
+                                },
+                              ),
+                            `${c.service} updated.`,
+                          ).then(() => setCredEdit(null));
+                        }}
+                        className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                      >
+                        Save changes
+                      </button>
+                      <button
+                        onClick={() => setCredEdit(null)}
+                        className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 )}
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    act(
-                      () =>
-                        apiFetch(`/clients/${id}/credentials/${c.id}`, {
-                          method: "DELETE",
-                        }),
-                      `Removed ${c.service}.`,
-                    )
-                  }
-                  className="text-xs text-red-600 underline"
-                >
-                  delete
-                </button>
-              </span>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <input
             className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
             placeholder="Service (e.g. fcc_cores)"
@@ -908,8 +1019,16 @@ export default function ClientDetailPage() {
             }
           />
           <input
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm sm:col-span-2"
+            placeholder="Login URL (e.g. https://carrier.example/login) — leave blank to use the known default"
+            value={credForm.url}
+            onChange={(e) =>
+              setCredForm({ ...credForm, url: e.target.value })
+            }
+          />
+          <input
             type="password"
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm sm:col-span-2"
             placeholder="Secret"
             value={credForm.secret}
             onChange={(e) =>
@@ -928,12 +1047,13 @@ export default function ClientDetailPage() {
                   body: JSON.stringify({
                     service: credForm.service,
                     username: credForm.username || null,
+                    url: credForm.url || null,
                     secret: credForm.secret,
                   }),
                 }),
               `${credForm.service} stored.`,
             ).then(() =>
-              setCredForm({ service: "", username: "", secret: "" }),
+              setCredForm({ service: "", username: "", url: "", secret: "" }),
             )
           }
           className="mt-2 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"

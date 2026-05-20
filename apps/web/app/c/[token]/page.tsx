@@ -59,6 +59,7 @@ export default function ClientPortalPage({
   const [credForm, setCredForm] = useState({
     service: "",
     username: "",
+    url: "",
     secret: "",
   });
   const [msg, setMsg] = useState<string | null>(null);
@@ -304,7 +305,7 @@ export default function ClientPortalPage({
               </span>
             </p>
           )}
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
               placeholder="Service (e.g. fcc_cores)"
@@ -322,9 +323,17 @@ export default function ClientPortalPage({
               }
             />
             <input
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm sm:col-span-2"
+              placeholder="Login URL (e.g. https://...) — optional; leave blank for known services"
+              value={credForm.url}
+              onChange={(e) =>
+                setCredForm({ ...credForm, url: e.target.value })
+              }
+            />
+            <input
               type="password"
               autoComplete="new-password"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm sm:col-span-2"
               placeholder="Password / API token"
               value={credForm.secret}
               onChange={(e) =>
@@ -344,12 +353,13 @@ export default function ClientPortalPage({
                     body: JSON.stringify({
                       service: credForm.service,
                       username: credForm.username || null,
+                      url: credForm.url || null,
                       secret: credForm.secret,
                     }),
                   }),
                 `${credForm.service} stored.`,
               ).then(() =>
-                setCredForm({ service: "", username: "", secret: "" }),
+                setCredForm({ service: "", username: "", url: "", secret: "" }),
               )
             }
             className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"

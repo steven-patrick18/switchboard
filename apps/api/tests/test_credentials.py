@@ -251,3 +251,188 @@ async def test_agent_tool_lists_creds_audited_no_secret(db: AsyncSession):
     for a in audits:
         blob = json.dumps({"before": a.before, "after": a.after})
         assert "TOPSECRET" not in blob
+
+
+# --- URL field + edit endpoint (v1.3.3) ------------------------------------
+
+
+async def test_url_stored_and_returned_via_api(db: AsyncSession):
+    """Adding a credential with a URL — server-side encrypts the
+    secret, stores the URL as plaintext (non-secret metadata), and
+    returns it on subsequent reads."""
+    cid = uuid.uuid4()
+    cred = await store_credential(
+        db,
+        client_id=cid,
+        service="fcc_cores",
+        secret="hunter2",
+        username="amber@amano.example",
+        url="https://apps.fcc.gov/cores/userLogin.do",
+    )
+    assert cred.url == "https://apps.fcc.gov/cores/userLogin.do"
+    # URL was not encrypted.
+    fresh = await db.scalar(select(Credential).where(Credential.id == cred.id))
+    assert fresh.url == "https://apps.fcc.gov/cores/userLogin.do"
+
+
+async def test_known_service_auto_fills_url(db: AsyncSession):
+    """Routes layer: if the operator doesn't supply a URL but the
+    service is in the well-known table, the URL gets populated. We
+    test this through the API since the auto-fill lives in the route."""
+    from app.api.routes.credentials import _default_url_for
+
+    assert _default_url_for("fcc_cores").startswith("https://apps.fcc.gov")
+    assert _default_url_for("FCC CORES") is not None  # normalized
+    assert _default_url_for("twilio").startswith("https://console.twilio.com")
+    # Unknown service → None, operator types their own.
+    assert _default_url_for("some_random_carrier") is None
+
+
+@pytest_asyncio.fixture
+async def http():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _db():
+        async with maker() as s:
+            yield s
+
+    app.dependency_overrides[get_db] = _db
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c, maker
+    app.dependency_overrides.clear()
+    await engine.dispose()
+
+
+async def test_patch_edits_url_username_without_rotating_secret(http):
+    """The operator can edit URL / username / expiration on an
+    existing credential WITHOUT touching the secret. The original
+    secret stays decryptable; only the metadata changes."""
+    c, maker = http
+    reg = await c.post(
+        "/auth/register",
+        json={"email": "op@example.com", "password": "supersecret", "name": "Op"},
+    )
+    h = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    cid = (await c.post("/clients", headers=h, json={"name": "Acme"})).json()["id"]
+
+    # Initial create with no URL — known-service auto-fill kicks in.
+    r = await c.post(
+        f"/clients/{cid}/credentials",
+        headers=h,
+        json={
+            "service": "fcc_cores",
+            "username": "amber@amano.example",
+            "secret": "original-password",
+        },
+    )
+    assert r.status_code == 201
+    body = r.json()
+    cred_id = body["id"]
+    assert body["url"] == "https://apps.fcc.gov/cores/userLogin.do"
+    assert body["username"] == "amber@amano.example"
+
+    # Patch only the URL — username + secret untouched.
+    r = await c.patch(
+        f"/clients/{cid}/credentials/{cred_id}",
+        headers=h,
+        json={"url": "https://apps.fcc.gov/cores/v2/login"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["url"] == "https://apps.fcc.gov/cores/v2/login"
+    assert body["username"] == "amber@amano.example"  # untouched
+    # Original secret still decryptable (no rotation).
+    async with maker() as s:
+        row = await s.scalar(select(Credential).where(Credential.id == uuid.UUID(cred_id)))
+        assert decrypt(row.secret_ciphertext) == "original-password"
+
+
+async def test_patch_can_rotate_secret(http):
+    c, maker = http
+    reg = await c.post(
+        "/auth/register",
+        json={"email": "op@example.com", "password": "supersecret", "name": "Op"},
+    )
+    h = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    cid = (await c.post("/clients", headers=h, json={"name": "Acme"})).json()["id"]
+    r = await c.post(
+        f"/clients/{cid}/credentials",
+        headers=h,
+        json={"service": "carrier_x", "secret": "old-secret"},
+    )
+    cred_id = r.json()["id"]
+
+    r = await c.patch(
+        f"/clients/{cid}/credentials/{cred_id}",
+        headers=h,
+        json={"new_secret": "new-secret"},
+    )
+    assert r.status_code == 200
+    async with maker() as s:
+        row = await s.scalar(select(Credential).where(Credential.id == uuid.UUID(cred_id)))
+        assert decrypt(row.secret_ciphertext) == "new-secret"
+
+
+async def test_patch_never_leaks_secret_in_audit(http):
+    c, maker = http
+    reg = await c.post(
+        "/auth/register",
+        json={"email": "op@example.com", "password": "supersecret", "name": "Op"},
+    )
+    h = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    cid = (await c.post("/clients", headers=h, json={"name": "Acme"})).json()["id"]
+    r = await c.post(
+        f"/clients/{cid}/credentials",
+        headers=h,
+        json={"service": "carrier_x", "secret": "INITIAL-CANARY"},
+    )
+    cred_id = r.json()["id"]
+    await c.patch(
+        f"/clients/{cid}/credentials/{cred_id}",
+        headers=h,
+        json={
+            "url": "https://carrierx.example/login",
+            "new_secret": "ROTATED-CANARY",
+        },
+    )
+    async with maker() as s:
+        audits = (await s.scalars(select(AuditLog))).all()
+    for a in audits:
+        blob = json.dumps({"before": a.before, "after": a.after})
+        assert "INITIAL-CANARY" not in blob
+        assert "ROTATED-CANARY" not in blob
+
+
+async def test_patch_other_operator_cannot_edit(http):
+    c, _ = http
+    reg_a = await c.post(
+        "/auth/register",
+        json={"email": "a@example.com", "password": "supersecret", "name": "A"},
+    )
+    ha = {"Authorization": f"Bearer {reg_a.json()['access_token']}"}
+    cid = (await c.post("/clients", headers=ha, json={"name": "Acme"})).json()["id"]
+    r = await c.post(
+        f"/clients/{cid}/credentials",
+        headers=ha,
+        json={"service": "carrier_x", "secret": "secret"},
+    )
+    cred_id = r.json()["id"]
+    reg_b = await c.post(
+        "/auth/register",
+        json={"email": "b@example.com", "password": "supersecret", "name": "B"},
+    )
+    hb = {"Authorization": f"Bearer {reg_b.json()['access_token']}"}
+    r = await c.patch(
+        f"/clients/{cid}/credentials/{cred_id}",
+        headers=hb,
+        json={"url": "https://evil.example"},
+    )
+    assert r.status_code == 404

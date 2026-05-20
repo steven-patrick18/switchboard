@@ -25,6 +25,7 @@ async def store_credential(
     username: str | None = None,
     scope: str | None = None,
     expires_at: datetime | None = None,
+    url: str | None = None,
 ) -> Credential:
     """Create or rotate the (client, service) credential. Encrypts the
     secret; never store or log plaintext."""
@@ -42,6 +43,7 @@ async def store_credential(
             secret_ciphertext=ciphertext,
             scope=scope,
             expires_at=expires_at,
+            url=url,
         )
         db.add(cred)
     else:
@@ -49,7 +51,37 @@ async def store_credential(
         existing.username = username
         existing.scope = scope
         existing.expires_at = expires_at
+        existing.url = url
         cred = existing
+    await db.flush()
+    return cred
+
+
+async def update_credential(
+    db: AsyncSession,
+    cred: Credential,
+    *,
+    url: str | None | type(...) = ...,
+    username: str | None | type(...) = ...,
+    scope: str | None | type(...) = ...,
+    expires_at: datetime | None | type(...) = ...,
+    new_secret: str | None = None,
+) -> Credential:
+    """Patch metadata on an existing credential — the operator can edit
+    URL, username, scope, expiration without rotating the secret. To
+    actually rotate the password, pass new_secret. The sentinel `...`
+    means 'leave that field untouched' (so we distinguish 'clear the
+    URL' from 'don't change the URL')."""
+    if url is not ...:
+        cred.url = url
+    if username is not ...:
+        cred.username = username
+    if scope is not ...:
+        cred.scope = scope
+    if expires_at is not ...:
+        cred.expires_at = expires_at
+    if new_secret is not None:
+        cred.secret_ciphertext = encrypt(new_secret)
     await db.flush()
     return cred
 
