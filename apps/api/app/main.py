@@ -97,6 +97,10 @@ async def system_status(
         "environment": settings.environment,
         "documents_dir": settings.documents_dir,
         "portal_integration_backend": settings.portal_integration_backend,
+        "app_version": settings.app_version,
+        # Railway sets these on every deploy. Empty in local dev.
+        "git_commit": (settings.railway_git_commit_sha or "")[:12] or None,
+        "git_branch": settings.railway_git_branch or None,
         **snap,
     }
 

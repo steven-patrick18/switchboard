@@ -11,6 +11,16 @@ class Settings(BaseSettings):
     environment: str = "development"
     app_secret_key: str = "change-me-generate-a-random-32-byte-string"
 
+    # Human-readable version stamp shown on the Settings page. Bumped
+    # in CHANGELOG.md commits; the live commit SHA below comes from
+    # the deploy platform and is the authoritative "what's running".
+    app_version: str = "1.0.0"
+    # Railway sets this automatically; safe to leave blank in dev.
+    # Read at request time so a redeploy shows the new hash without
+    # restarting the import-time settings cache.
+    railway_git_commit_sha: str = ""
+    railway_git_branch: str = ""
+
     database_url: str = "postgresql://switchboard:switchboard@localhost:5432/switchboard"
     redis_url: str = "redis://localhost:6379/0"
 

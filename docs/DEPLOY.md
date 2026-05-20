@@ -220,6 +220,32 @@ If all of that worked, you're live.
 
 ---
 
+## Updating production
+
+Railway auto-deploys from `main`. So the update flow is just:
+
+1. **A new commit lands on `main`** (e.g. via this repo's pushes).
+2. **Railway rebuilds** the affected service (api or web) and ships
+   the new image. Watch progress in Railway → service → Deployments.
+3. **API container boots**, runs `alembic upgrade head` first, then
+   uvicorn. Schema migrations apply automatically — no manual step.
+4. **Web container builds with the current `NEXT_PUBLIC_API_URL`**
+   as a build arg and serves the new bundle.
+
+Total: usually 2-4 minutes from push to live.
+
+**What changed in this version?** Settings → Platform readiness
+shows the current **Version** and the deployed **Commit** hash,
+with a "What's new ↗" link to the [CHANGELOG.md](../CHANGELOG.md)
+so you (or anyone you hand the platform to) can see what shipped.
+
+**Roll back**: Railway → service → Deployments → click an earlier
+green deploy → **Redeploy**. Note that Postgres migrations are
+**not** auto-reverted; if a migration broke something, also run
+`python -m alembic downgrade -1` inside the api container.
+
+---
+
 ## Day-2 operations
 
 | Task | Where |

@@ -26,6 +26,9 @@ type SystemStatus = {
   app_base_url: string | null;
   documents_dir: string;
   portal_integration_backend: string;
+  app_version: string;
+  git_commit: string | null;
+  git_branch: string | null;
 };
 
 function ReadyRow({
@@ -302,6 +305,35 @@ export default function SettingsPage() {
                 Document storage:
               </span>{" "}
               <code className="text-xs">{status.documents_dir}</code>
+            </div>
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-slate-200 pt-3 text-xs text-slate-500 sm:col-span-2">
+              <span>
+                <span className="font-medium text-slate-700">Version:</span>{" "}
+                <code className="rounded bg-slate-100 px-1.5 py-0.5">
+                  v{status.app_version}
+                </code>
+              </span>
+              {status.git_commit && (
+                <span>
+                  <span className="font-medium text-slate-700">Commit:</span>{" "}
+                  <code className="rounded bg-slate-100 px-1.5 py-0.5">
+                    {status.git_commit}
+                  </code>
+                  {status.git_branch && status.git_branch !== "main" && (
+                    <span className="ml-1">
+                      ({status.git_branch})
+                    </span>
+                  )}
+                </span>
+              )}
+              <a
+                href="https://github.com/steven-patrick18/switchboard/blob/main/CHANGELOG.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-600 underline hover:text-slate-900"
+              >
+                What&apos;s new ↗
+              </a>
             </div>
           </dl>
         </section>
