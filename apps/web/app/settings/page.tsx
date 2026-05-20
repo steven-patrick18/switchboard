@@ -31,6 +31,41 @@ type SystemStatus = {
   git_branch: string | null;
 };
 
+type UpdateStatus = {
+  repo: string;
+  current_commit: string | null;
+  update_pending: boolean;
+  update_pending_meta: { requested_by: string; requested_at: string } | null;
+  up_to_date: boolean | null;
+  latest_available: {
+    sha: string;
+    message: string;
+    author: string;
+    date: string;
+    url: string;
+  } | null;
+  check_error?: string | null;
+};
+
+type CertificateInfo =
+  | {
+      available: true;
+      host: string;
+      subject_cn: string | null;
+      issuer_o: string | null;
+      issuer_cn: string | null;
+      not_after: string;
+      days_until_expiry: number;
+      alt_names: string[];
+      auto_renewed_by: string;
+    }
+  | { available: false; reason: string };
+
+type HealthCheck = {
+  overall_ok: boolean;
+  checks: Record<string, { ok: boolean; note?: string; error?: string; path?: string }>;
+};
+
 function ReadyRow({
   label,
   ok,
@@ -63,6 +98,12 @@ const INPUT_CLS =
 export default function SettingsPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateStatus | null>(null);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [cert, setCert] = useState<CertificateInfo | null>(null);
+  const [certLoading, setCertLoading] = useState(false);
+  const [health, setHealth] = useState<HealthCheck | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
   const [name, setName] = useState("");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -93,6 +134,9 @@ export default function SettingsPage() {
     setMe(u);
     setName(u.name);
     setStatus(s);
+    // Fire-and-forget the three diagnostic loads so the page paints fast.
+    loadUpdate();
+    loadCert();
     // Pre-fill non-secret fields so the operator can edit them in
     // place instead of retyping. Secrets stay blank.
     setAgentModel(s.agent_model ?? "");
@@ -229,6 +273,71 @@ export default function SettingsPage() {
     setSmtpPassword("");
   }
 
+  async function loadUpdate() {
+    setUpdateLoading(true);
+    try {
+      setUpdateInfo(await apiFetch<UpdateStatus>("/system/update"));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Update check failed");
+    } finally {
+      setUpdateLoading(false);
+    }
+  }
+
+  async function applyUpdate() {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const r = await apiFetch<{ note: string }>("/system/update/request", {
+        method: "POST",
+      });
+      setMsg(r.note);
+      await loadUpdate();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not queue update");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelUpdate() {
+    setBusy(true);
+    try {
+      await apiFetch("/system/update/request", { method: "DELETE" });
+      setMsg("Update request cancelled.");
+      await loadUpdate();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Cancel failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadCert() {
+    setCertLoading(true);
+    try {
+      setCert(await apiFetch<CertificateInfo>("/system/certificate"));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Cert check failed");
+    } finally {
+      setCertLoading(false);
+    }
+  }
+
+  async function runSelfTest() {
+    setHealthLoading(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      setHealth(await apiFetch<HealthCheck>("/health/detailed"));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Self-test failed");
+    } finally {
+      setHealthLoading(false);
+    }
+  }
+
   async function sendTestEmail() {
     setBusy(true);
     setMsg(null);
@@ -338,6 +447,270 @@ export default function SettingsPage() {
           </dl>
         </section>
       )}
+
+      {/* --- System updates --- */}
+      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            System updates
+          </h2>
+          <button
+            onClick={loadUpdate}
+            disabled={updateLoading}
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
+          >
+            {updateLoading ? "Checking…" : "Check for updates"}
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Compares the live commit against the latest on GitHub. Clicking
+          Apply update writes a sentinel file the host&apos;s update cron
+          picks up on its next tick (5 min by default). VPS only — on
+          Railway, push to <code>main</code> auto-deploys.
+        </p>
+
+        {updateInfo == null && !updateLoading && (
+          <p className="mt-3 text-xs text-slate-400">
+            Click Check for updates to see what&apos;s available.
+          </p>
+        )}
+
+        {updateInfo && (
+          <div className="mt-3 space-y-2 text-sm">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="text-xs text-slate-500">Repository:</span>
+              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+                {updateInfo.repo}
+              </code>
+            </div>
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span className="text-xs text-slate-500">Live:</span>
+              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+                {updateInfo.current_commit ?? "unknown (dev?)"}
+              </code>
+              <span className="text-xs text-slate-500">Latest:</span>
+              <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+                {updateInfo.latest_available?.sha ?? "n/a"}
+              </code>
+              {updateInfo.up_to_date === true && (
+                <span className="rounded bg-green-100 px-1.5 py-0.5 text-xs font-semibold text-green-800">
+                  up to date
+                </span>
+              )}
+              {updateInfo.up_to_date === false && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
+                  update available
+                </span>
+              )}
+            </div>
+            {updateInfo.latest_available && (
+              <p className="text-xs text-slate-600">
+                <span className="font-medium">Latest commit:</span>{" "}
+                {updateInfo.latest_available.message}{" "}
+                <span className="text-slate-400">
+                  by {updateInfo.latest_available.author},{" "}
+                  {new Date(
+                    updateInfo.latest_available.date,
+                  ).toLocaleString()}
+                </span>{" "}
+                <a
+                  href={updateInfo.latest_available.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-700 underline"
+                >
+                  view ↗
+                </a>
+              </p>
+            )}
+            {updateInfo.check_error && (
+              <p className="text-xs text-red-600">
+                Could not reach GitHub: {updateInfo.check_error}
+              </p>
+            )}
+
+            {updateInfo.update_pending && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <p className="font-semibold">Update queued.</p>
+                {updateInfo.update_pending_meta && (
+                  <p className="mt-1">
+                    Requested by{" "}
+                    {updateInfo.update_pending_meta.requested_by} at{" "}
+                    {new Date(
+                      updateInfo.update_pending_meta.requested_at,
+                    ).toLocaleString()}
+                    . The host&apos;s update cron will run on its next
+                    tick.
+                  </p>
+                )}
+                <button
+                  onClick={cancelUpdate}
+                  disabled={busy}
+                  className="mt-2 rounded-md border border-amber-300 px-2 py-1 text-xs hover:bg-amber-100 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                onClick={applyUpdate}
+                disabled={
+                  busy ||
+                  !updateInfo.latest_available ||
+                  updateInfo.up_to_date === true ||
+                  updateInfo.update_pending
+                }
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                Apply update
+              </button>
+              <a
+                href="https://github.com/steven-patrick18/switchboard/blob/main/CHANGELOG.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+              >
+                Changelog ↗
+              </a>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* --- HTTPS certificate --- */}
+      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            HTTPS certificate
+          </h2>
+          <button
+            onClick={loadCert}
+            disabled={certLoading}
+            className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
+          >
+            {certLoading ? "Checking…" : "Refresh"}
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Reads the live cert from your public URL. On the VPS deploy,
+          Caddy auto-renews 30 days before expiry — you shouldn&apos;t
+          have to do anything.
+        </p>
+        {cert == null && !certLoading && (
+          <p className="mt-3 text-xs text-slate-400">Loading…</p>
+        )}
+        {cert && !cert.available && (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            {cert.reason}
+          </p>
+        )}
+        {cert && cert.available && (
+          <dl className="mt-3 grid grid-cols-1 gap-y-2 text-sm sm:grid-cols-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs text-slate-500">Domain:</span>
+              <code className="text-sm">{cert.host}</code>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs text-slate-500">Issuer:</span>
+              <span className="text-sm">
+                {cert.issuer_o ?? cert.issuer_cn ?? "unknown"}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs text-slate-500">Expires:</span>
+              <span className="text-sm">
+                {new Date(cert.not_after).toLocaleString()}
+              </span>
+              <span
+                className={
+                  "rounded px-1.5 py-0.5 text-xs font-semibold " +
+                  (cert.days_until_expiry > 14
+                    ? "bg-green-100 text-green-800"
+                    : cert.days_until_expiry > 3
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-red-100 text-red-800")
+                }
+              >
+                in {cert.days_until_expiry} days
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs text-slate-500">Renewal:</span>
+              <span className="text-sm">{cert.auto_renewed_by}</span>
+            </div>
+            {cert.alt_names.length > 0 && (
+              <div className="sm:col-span-2">
+                <span className="text-xs text-slate-500">Covers:</span>{" "}
+                <span className="font-mono text-xs text-slate-700">
+                  {cert.alt_names.join(", ")}
+                </span>
+              </div>
+            )}
+          </dl>
+        )}
+      </section>
+
+      {/* --- Self-test --- */}
+      <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            System self-test
+          </h2>
+          <button
+            onClick={runSelfTest}
+            disabled={healthLoading}
+            className="rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {healthLoading ? "Running…" : "Run self-test"}
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          Verifies each subsystem (database, document storage, Anthropic
+          key, SMTP, update channel). Read-only; safe to run any time.
+        </p>
+        {health && (
+          <div className="mt-3 space-y-1 text-sm">
+            <div className="flex items-baseline gap-2">
+              <span
+                className={
+                  "rounded px-1.5 py-0.5 text-xs font-semibold " +
+                  (health.overall_ok
+                    ? "bg-green-100 text-green-800"
+                    : "bg-amber-100 text-amber-800")
+                }
+              >
+                {health.overall_ok ? "all systems ok" : "some checks failing"}
+              </span>
+            </div>
+            <ul className="mt-2 divide-y divide-slate-200 rounded-md border border-slate-200">
+              {Object.entries(health.checks).map(([name, c]) => (
+                <li key={name} className="flex items-baseline gap-3 p-2 text-xs">
+                  <span
+                    className={
+                      "rounded px-1.5 py-0.5 font-semibold " +
+                      (c.ok
+                        ? "bg-green-100 text-green-800"
+                        : "bg-red-100 text-red-800")
+                    }
+                  >
+                    {c.ok ? "ok" : "fail"}
+                  </span>
+                  <span className="font-mono text-sm">{name}</span>
+                  {c.note && <span className="text-slate-500">— {c.note}</span>}
+                  {c.error && (
+                    <span className="text-red-600">— {c.error}</span>
+                  )}
+                  {c.path && (
+                    <code className="text-slate-400">{c.path}</code>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </section>
 
       <section className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">

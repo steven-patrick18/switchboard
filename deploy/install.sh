@@ -68,6 +68,15 @@ if [ "${API_DOMAIN:-}" = "" ] || [ "${API_DOMAIN}" = "api.your-domain.com" ]; th
     exit 0
 fi
 
+# --- Host directory for the GUI-triggered update sentinel ------------------
+# The api container bind-mounts this so the "Apply update" button in the
+# Settings GUI can drop a flag file the host's update.sh cron picks up.
+if [ ! -d /var/run/switchboard ]; then
+    echo "==> Creating /var/run/switchboard for GUI update sentinel"
+    mkdir -p /var/run/switchboard
+    chmod 1777 /var/run/switchboard  # sticky world-writable like /tmp
+fi
+
 # --- Build + start ----------------------------------------------------------
 echo "==> Building and starting the stack"
 docker compose --env-file .env -f docker-compose.yml up -d --build --remove-orphans
@@ -83,3 +92,11 @@ echo "    https://${API_DOMAIN}/health    (should return {\"status\":\"ok\",...}
 echo
 echo "Tail logs with:    docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f"
 echo "Update after git push:    bash deploy/update.sh"
+echo
+echo "Recommended: enable the auto-update cron so the GUI's 'Apply update'"
+echo "button works without SSH. Run:"
+echo
+echo "    (crontab -l 2>/dev/null; echo '*/5 * * * * $REPO_ROOT/deploy/update.sh >> /var/log/switchboard-update.log 2>&1') | crontab -"
+echo
+echo "Once the cron is in place, Settings → System updates can deploy"
+echo "the latest commit on its next 5-minute tick."

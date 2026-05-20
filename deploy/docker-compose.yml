@@ -51,6 +51,10 @@ services:
       DOCUMENTS_DIR: /app/.documents
     volumes:
       - documents_data:/app/.documents
+      # Sentinel file the GUI's "Apply update" button writes here; the
+      # host's update.sh cron polls the same path and triggers an
+      # immediate rebuild when the file exists.
+      - /var/run/switchboard:/var/run/switchboard
     expose:
       - "8000"
 

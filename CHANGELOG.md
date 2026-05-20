@@ -6,6 +6,47 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.2.0 — Update + HTTPS + self-test in the GUI · 2026-05-20
+
+### Added — Production-operations from the Settings page
+- **System updates** card — shows live commit vs. latest on
+  `origin/main` (queried from GitHub's public API), one-click
+  **Apply update** writes a sentinel file the host's `update.sh`
+  cron picks up on its next tick. **Cancel** unwrites it before
+  the cron fires. Audited as `system.update_requested` /
+  `system.update_cancelled`.
+- **HTTPS certificate** card — connects from the API to its own
+  public URL, reads the live cert, surfaces issuer, expiry date,
+  days-until-expiry (with green/amber/red pill), covered domains,
+  and whether Caddy auto-renews. Confirms TLS health at a glance
+  without SSH.
+- **System self-test** card — five subsystem checks (database,
+  document storage, Anthropic key configured, SMTP configured,
+  update channel writable) returned by `/health/detailed`. Each
+  check shows ok/fail + a one-line explanation, so the operator
+  can diagnose "what's not working" from the browser.
+
+### Added — Production hardening
+- **Sentry** integration via optional `SENTRY_DSN` env var. Empty
+  = no-op. Configured with `send_default_pii=False` (Sentry never
+  sees operator emails or IPs) and release tag = `app_version`.
+- New `app_version` bumped to `1.2.0`.
+- deploy/install.sh creates `/var/run/switchboard` on the VPS so
+  the GUI's "Apply update" can drop sentinels there. Compose binds
+  the same directory into the api container.
+- deploy/update.sh checks the sentinel and runs immediately when
+  present (otherwise it's the regular git-ahead check). Safe in
+  cron — no-op when nothing's pending.
+
+### Wired
+- `GET /system/update` — current vs. latest commit + pending status
+- `POST /system/update/request` — queue a deploy (202 + sentinel)
+- `DELETE /system/update/request` — cancel a queued deploy
+- `GET /system/certificate` — read peer cert from the public URL
+- `GET /health/detailed` — per-subsystem self-test
+
+98 backend tests pass; tsc clean.
+
 ## v1.1.0 — Self-hosted VPS deploy + update flow · 2026-05-20
 
 ### Added

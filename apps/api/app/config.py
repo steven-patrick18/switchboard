@@ -1,6 +1,9 @@
+import logging
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+log = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -14,12 +17,26 @@ class Settings(BaseSettings):
     # Human-readable version stamp shown on the Settings page. Bumped
     # in CHANGELOG.md commits; the live commit SHA below comes from
     # the deploy platform and is the authoritative "what's running".
-    app_version: str = "1.1.0"
+    app_version: str = "1.2.0"
     # Railway sets this automatically; safe to leave blank in dev.
     # Read at request time so a redeploy shows the new hash without
     # restarting the import-time settings cache.
     railway_git_commit_sha: str = ""
     railway_git_branch: str = ""
+
+    # GitHub repository (owner/name) the GUI's "Check for updates"
+    # button queries for the latest commit on main.
+    github_repo: str = "steven-patrick18/switchboard"
+
+    # Host bind-mounted directory the API writes update-request
+    # sentinels into. The host's update.sh cron polls this path and
+    # triggers an immediate deploy.sh run when the file exists.
+    update_request_file: str = "/var/run/switchboard/update-requested"
+
+    # Sentry error tracking. Empty disables. Set on Railway / in
+    # production .env for centralized error monitoring.
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.0  # 0 = off; 0.1 = sample 10% of traces
 
     database_url: str = "postgresql://switchboard:switchboard@localhost:5432/switchboard"
     redis_url: str = "redis://localhost:6379/0"
