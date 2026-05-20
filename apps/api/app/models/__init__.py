@@ -3,6 +3,7 @@ from app.models.approval import Approval
 from app.models.audit_log import AuditLog
 from app.models.client import Client
 from app.models.client_intake import ClientIntake
+from app.models.client_link import ClientLink
 from app.models.credential import Credential
 from app.models.document import Document
 from app.models.project import Project
@@ -15,6 +16,7 @@ __all__ = [
     "AuditLog",
     "Client",
     "ClientIntake",
+    "ClientLink",
     "Credential",
     "Document",
     "Project",

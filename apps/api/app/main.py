@@ -9,6 +9,8 @@ from app.api.routes import (
     audit,
     auth,
     briefing,
+    client_links,
+    client_portal,
     clients,
     credentials,
     intake,
@@ -39,6 +41,8 @@ app.include_router(briefing.router)
 app.include_router(audit.router)
 app.include_router(credentials.router)
 app.include_router(portal_actions.router)
+app.include_router(client_links.router)
+app.include_router(client_portal.router)
 
 
 @app.get("/health")

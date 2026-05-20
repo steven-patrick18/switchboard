@@ -58,6 +58,17 @@ type Audit = {
   subject: string;
 };
 
+type ShareLink = {
+  id: string;
+  client_id: string;
+  label: string | null;
+  token: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  created_at: string;
+};
+
 const AGENTS = ["pm", "compliance", "document"];
 
 function formatBytes(n: number): string {
@@ -353,6 +364,9 @@ export default function ClientDetailPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [audit, setAudit] = useState<Audit[]>([]);
   const [creds, setCreds] = useState<Cred[]>([]);
+  const [links, setLinks] = useState<ShareLink[]>([]);
+  const [linkLabel, setLinkLabel] = useState("");
+  const [linkExpires, setLinkExpires] = useState("");
   const [credForm, setCredForm] = useState({
     service: "",
     username: "",
@@ -368,13 +382,14 @@ export default function ClientDetailPage() {
 
   const load = useCallback(async () => {
     try {
-      const [clients, st, d, t, au, cr] = await Promise.all([
+      const [clients, st, d, t, au, cr, lk] = await Promise.all([
         apiFetch<ClientMeta[]>("/clients"),
         apiFetch<IntakeStatus>(`/clients/${id}/intake`),
         apiFetch<Doc[]>(`/clients/${id}/documents`),
         apiFetch<Task[]>(`/clients/${id}/tasks`),
         apiFetch<Audit[]>(`/clients/${id}/audit`),
         apiFetch<Cred[]>(`/clients/${id}/credentials`),
+        apiFetch<ShareLink[]>(`/clients/${id}/links`),
       ]);
       setMeta(clients.find((c) => c.id === id) ?? null);
       setIntake(st);
@@ -382,6 +397,7 @@ export default function ClientDetailPage() {
       setTasks(t);
       setAudit(au);
       setCreds(cr);
+      setLinks(lk);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Failed to load");
     }
@@ -813,6 +829,140 @@ export default function ClientDetailPage() {
         >
           Store credential
         </button>
+      </section>
+
+      {/* Share links — public client portal */}
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Client share links
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Send the URL below to the client. They can fill the intake, upload
+          documents, and drop in portal credentials — their changes audit as
+          <code className="mx-1 rounded bg-slate-100 px-1">{`client:{link.id}`}</code>
+          so this trail shows exactly who did what. Revoke a link any time.
+        </p>
+        <ul className="mt-2 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
+          {links.length === 0 && (
+            <li className="p-3 text-sm text-slate-500">No links yet.</li>
+          )}
+          {links.map((l) => {
+            const url = `${window.location.origin}/c/${l.token}`;
+            const status = l.revoked_at
+              ? "revoked"
+              : l.expires_at && new Date(l.expires_at) <= new Date()
+                ? "expired"
+                : "active";
+            return (
+              <li
+                key={l.id}
+                className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm"
+              >
+                <span className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{l.label ?? "(no label)"}</span>
+                    <span
+                      className={
+                        status === "active"
+                          ? "rounded bg-green-100 px-1.5 py-0.5 text-xs font-semibold text-green-800"
+                          : "rounded bg-slate-200 px-1.5 py-0.5 text-xs font-semibold text-slate-700"
+                      }
+                    >
+                      {status}
+                    </span>
+                    {l.expires_at && (
+                      <span className="text-xs text-slate-500">
+                        expires {new Date(l.expires_at).toLocaleString()}
+                      </span>
+                    )}
+                    {l.last_used_at && (
+                      <span className="text-xs text-slate-500">
+                        last used {new Date(l.last_used_at).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    readOnly
+                    value={url}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="mt-1 w-full truncate rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700"
+                  />
+                </span>
+                <span className="flex items-center gap-3">
+                  <button
+                    onClick={() =>
+                      navigator.clipboard
+                        .writeText(url)
+                        .then(() => setMsg("Link copied to clipboard."))
+                        .catch(() => setMsg("Couldn't copy — select the URL manually."))
+                    }
+                    className="text-xs text-slate-700 underline"
+                  >
+                    copy
+                  </button>
+                  {!l.revoked_at && (
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        act(
+                          () =>
+                            apiFetch(`/clients/${id}/links/${l.id}`, {
+                              method: "DELETE",
+                            }),
+                          "Link revoked.",
+                        )
+                      }
+                      className="text-xs text-red-600 underline"
+                    >
+                      revoke
+                    </button>
+                  )}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
+          <input
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Label (e.g. 'First share', 'Re-issued 5/20')"
+            value={linkLabel}
+            onChange={(e) => setLinkLabel(e.target.value)}
+          />
+          <input
+            type="number"
+            min={1}
+            max={24 * 365}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Expires in (hours, optional)"
+            value={linkExpires}
+            onChange={(e) => setLinkExpires(e.target.value)}
+          />
+          <button
+            disabled={busy}
+            onClick={() =>
+              act(
+                () =>
+                  apiFetch(`/clients/${id}/links`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                      label: linkLabel || null,
+                      expires_in_hours: linkExpires
+                        ? Number(linkExpires)
+                        : null,
+                    }),
+                  }),
+                "Share link created.",
+              ).then(() => {
+                setLinkLabel("");
+                setLinkExpires("");
+              })
+            }
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          >
+            Generate link
+          </button>
+        </div>
       </section>
 
       {/* Run an agent */}

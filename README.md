@@ -20,6 +20,7 @@ End-to-end, all operator-scoped and audited:
 - **Task running** — run a queued sub-task, or a bounded bulk sweep of all queued tasks.
 - **Immutable audit trail** + **CSV export** (per-client and operator-wide) + a deterministic operator **daily briefing** + **per-client archive zip** (intake.json + audit.csv + latest version of every uploaded document) for handoff or compliance archiving.
 - **Best-effort SMTP notifications**: configure `SMTP_*` env vars and the platform emails the owning operator the moment an agent queues a tier-2/3 approval. Empty config = email disabled; SMTP failures never block the agent loop.
+- **Public client portal**: the operator mints a magic link from the client page; the client opens it and fills intake, uploads documents, and drops in portal logins — all scoped to that one client. Every action audits as `client:{link_id}` so the operator's trail shows who did what. Links carry optional expiration; revoke any time.
 - **Web UI** with a professional desktop layout (fixed left sidebar, `max-w-7xl` content): `/dashboard`, `/workspaces`, `/clients/[id]`, `/approvals`, `/history`, `/settings`.
 
 ## Monorepo layout
