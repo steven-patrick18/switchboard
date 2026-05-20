@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/workspaces", label: "Workspaces" },
   { href: "/approvals", label: "Approval queue" },
   { href: "/history", label: "History" },
+  { href: "/agents", label: "AI Agents" },
   { href: "/settings", label: "Settings" },
 ];
 

@@ -69,8 +69,6 @@ type ShareLink = {
   created_at: string;
 };
 
-const AGENTS = ["pm", "compliance", "document"];
-
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -376,6 +374,11 @@ export default function ClientDetailPage() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
   const [agent, setAgent] = useState("compliance");
+  const [availableAgents, setAvailableAgents] = useState<string[]>([
+    "pm",
+    "compliance",
+    "document",
+  ]);
   const [instruction, setInstruction] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -406,6 +409,29 @@ export default function ClientDetailPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Pull the live agent roster (built-ins + the operator's custom
+  // agents) so newly-created ones show up in the dropdown without a
+  // hardcoded list.
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await apiFetch<{ name: string; enabled: boolean }[]>(
+          "/agents",
+        );
+        const enabled = rows
+          .filter((a) => a.enabled)
+          .map((a) => a.name);
+        // De-duplicate while preserving order (a custom agent named the
+        // same as a built-in appears once).
+        const seen = new Set<string>();
+        const list = enabled.filter((n) => (seen.has(n) ? false : (seen.add(n), true)));
+        if (list.length > 0) setAvailableAgents(list);
+      } catch {
+        // Fall through to the hardcoded default list.
+      }
+    })();
+  }, []);
 
   async function act(fn: () => Promise<unknown>, ok: string) {
     setBusy(true);
@@ -976,7 +1002,7 @@ export default function ClientDetailPage() {
             value={agent}
             onChange={(e) => setAgent(e.target.value)}
           >
-            {AGENTS.map((a) => (
+            {availableAgents.map((a) => (
               <option key={a} value={a}>
                 {a}
               </option>

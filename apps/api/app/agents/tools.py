@@ -456,3 +456,33 @@ request_portal_action = Tool(
     tier=TIER_APPROVE,
     runner=None,
 )
+
+
+# --- Tool catalog (single source of truth for the GUI picker) -------
+# Every code-defined Tool that an operator can include in an agent
+# must be registered here. Tiers stay code-defined for safety; the
+# operator can only choose which tools an agent gets, not redefine
+# them or change their tier classification.
+
+ALL_TOOLS: dict[str, Tool] = {
+    tool.name: tool
+    for tool in (
+        # Compliance scope
+        lookup_fcc_requirement,
+        queue_filing_submission,
+        # Project-management scope
+        get_voip_launch_playbook,
+        check_intake_status,
+        assign_task,
+        # Document scope
+        lookup_document_template,
+        send_document_for_signature,
+        # Cross-cutting
+        check_client_credentials,
+        request_portal_action,
+    )
+}
+
+
+def get_tool(name: str) -> Tool | None:
+    return ALL_TOOLS.get(name)

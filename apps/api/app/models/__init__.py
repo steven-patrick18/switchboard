@@ -1,3 +1,4 @@
+from app.models.agent import Agent
 from app.models.agent_run import AgentRun
 from app.models.approval import Approval
 from app.models.audit_log import AuditLog
@@ -12,6 +13,7 @@ from app.models.task import Task
 from app.models.user import User
 
 __all__ = [
+    "Agent",
     "AgentRun",
     "Approval",
     "AuditLog",
