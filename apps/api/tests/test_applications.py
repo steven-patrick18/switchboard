@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 
 from app.agents.tools import ToolContext, update_application_stage
-from app.applications import resolve_required_applications
+from app.applications import MANDATORY_FIVE, resolve_required_applications
 from app.db import Base, get_db
 from app.main import app
 from app.models import Application, ClientIntake
@@ -73,7 +73,10 @@ def test_resolve_pre_formation_returns_founder_set_only():
     assert set(needed) == {"entity_formation", "ein", "bank_account"}
 
 
-def test_resolve_entity_stage_includes_ocn_and_per_state():
+def test_resolve_entity_stage_includes_mandatory_five_and_per_state():
+    """Every US voice carrier must complete the five FCC/NECA filings:
+    CORES (FRN), OCN, FCC 499, RMD, STIR/SHAKEN — in that order. Each
+    target state also pulls in a state CPCN row."""
     intake = ClientIntake(
         client_id=uuid.uuid4(),
         ein="99-1234567",
@@ -81,10 +84,19 @@ def test_resolve_entity_stage_includes_ocn_and_per_state():
         intends_international=False,
     )
     needed = resolve_required_applications(intake)
-    assert "ocn" in needed
-    assert "fcc_499" in needed
-    assert "rmd" in needed
-    assert "stir_shaken" in needed
+    # The mandatory five — order preserved in the returned list.
+    for app_type in MANDATORY_FIVE:
+        assert app_type in needed, f"missing mandatory {app_type}"
+    # CORES (FRN) is FIRST among the mandatory five so the operator
+    # gets the FRN before NECA / 499 / RMD references ask for it.
+    five_indexes = [needed.index(t) for t in MANDATORY_FIVE]
+    assert five_indexes == sorted(five_indexes), (
+        "Mandatory five must appear in dependency order"
+    )
+    assert needed.index("cores_frn") < needed.index("ocn")
+    assert needed.index("ocn") < needed.index("rmd")
+    assert needed.index("rmd") < needed.index("stir_shaken")
+    # State CPCNs come along too.
     assert "state_cpcn:TX" in needed
     assert "state_cpcn:CA" in needed
     # No international → no Section 214.
@@ -115,9 +127,9 @@ async def test_sync_from_intake_creates_required_apps_and_is_idempotent(ctx):
     r = await c.post(f"/clients/{cid}/applications/sync", headers=h)
     assert r.status_code == 200
     created = set(r.json()["created"])
-    # OCN is included — that's the user's specific ask.
-    assert "ocn" in created
-    assert {"fcc_499", "rmd", "stir_shaken", "state_cpcn:TX", "state_cpcn:CA"} <= created
+    # The whole mandatory five lands plus per-state CPCN rows.
+    assert {"cores_frn", "ocn", "fcc_499", "rmd", "stir_shaken"} <= created
+    assert {"state_cpcn:TX", "state_cpcn:CA"} <= created
 
     # List shows them with derived labels + default agent.
     r = await c.get(f"/clients/{cid}/applications", headers=h)

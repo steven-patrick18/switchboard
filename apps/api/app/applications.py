@@ -19,11 +19,23 @@ from app.models.client_intake import ClientIntake
 TYPE_ENTITY_FORMATION = "entity_formation"
 TYPE_EIN = "ein"
 TYPE_BANK_ACCOUNT = "bank_account"
+TYPE_CORES_FRN = "cores_frn"
 TYPE_OCN = "ocn"
 TYPE_FCC_499 = "fcc_499"
 TYPE_RMD = "rmd"
 TYPE_STIR_SHAKEN = "stir_shaken"
 TYPE_SECTION_214 = "section_214"
+
+# The five FCC/NECA filings that MUST be in place before a carrier
+# will provision live voice traffic. Order matters — earlier ones are
+# prerequisites for later ones.
+MANDATORY_FIVE = (
+    TYPE_CORES_FRN,      # 1. Get an FRN — required to file 499 or anything else with the FCC
+    TYPE_OCN,            # 2. NECA OCN — required to enter RMD and signal with most carriers
+    TYPE_FCC_499,        # 3. FCC 499 filer registration — required to legally provide service
+    TYPE_RMD,            # 4. Robocall Mitigation Database — required before carriers will accept traffic
+    TYPE_STIR_SHAKEN,    # 5. STIR/SHAKEN cert — required to sign outbound calls
+)
 # state_cpcn:<XX> — one per target state
 # carrier:<name>  — one per intended wholesale carrier (operator picks)
 
@@ -55,6 +67,18 @@ _CATALOG: dict[str, ApplicationSpec] = {
         label="Business bank account",
         description="Operating account — needed before carrier deposits.",
         default_agent="intake",
+    ),
+    TYPE_CORES_FRN: ApplicationSpec(
+        type=TYPE_CORES_FRN,
+        label="FCC CORES (FRN)",
+        description=(
+            "FCC Commission Registration System (CORES) registration to "
+            "obtain an FRN (FCC Registration Number). PREREQUISITE for "
+            "Form 499 and any other FCC filing. Free, ~15 minutes online "
+            "at apps.fcc.gov/cores. Required before OCN application too "
+            "(NECA asks for the FRN)."
+        ),
+        default_agent="compliance",
     ),
     TYPE_OCN: ApplicationSpec(
         type=TYPE_OCN,
@@ -168,16 +192,20 @@ def resolve_required_applications(intake: ClientIntake | None) -> list[str]:
         apps.extend([TYPE_ENTITY_FORMATION, TYPE_EIN, TYPE_BANK_ACCOUNT])
         return apps
 
-    # Entity stage: everything except things still in flight.
+    # Entity stage: founder set + the FIVE mandatory filings every US
+    # voice carrier must complete before live traffic. Order in this
+    # list is also the recommended filing order: CORES (get FRN) →
+    # OCN → 499 → RMD → STIR/SHAKEN.
     apps.extend(
         [
             TYPE_ENTITY_FORMATION,
             TYPE_EIN,
             TYPE_BANK_ACCOUNT,
-            TYPE_OCN,
-            TYPE_FCC_499,
-            TYPE_RMD,
-            TYPE_STIR_SHAKEN,
+            TYPE_CORES_FRN,   # 1
+            TYPE_OCN,         # 2
+            TYPE_FCC_499,     # 3
+            TYPE_RMD,         # 4
+            TYPE_STIR_SHAKEN, # 5
         ]
     )
     if intake is not None and getattr(intake, "intends_international", False):
