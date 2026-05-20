@@ -6,6 +6,51 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.13 — Live Activity stops lying about phantom approvals · 2026-05-20
+
+### Fixed — `/activity` now agrees with `/approvals`
+Amber Sidney Hunt's screenshot showed `AWAITING APPROVAL: 1` on
+Live Activity while the Approval queue showed `0 pending`. Two
+queries, two different fields:
+
+- `/activity` counted `Task.status='awaiting_approval'`
+- `/approvals` counts `Approval.decision='pending'` (the actual
+  source of truth)
+
+The bug surfaced because the v1.3.10 task close-out fix
+(`_close_task_if_done`) wasn't deployed when the operator decided
+an earlier approval — so the parent task got permanently stuck at
+`awaiting_approval` even though the approval underneath was already
+decided. After v1.3.10 deployed nothing retroactively fixed the
+stuck rows.
+
+### Two changes in /activity
+1. **Source of truth.** The `awaiting_approval` feed and tile are
+   now driven by `Approval.decision='pending'` (joined back to its
+   Task for the agent + instruction + client). One row per task
+   even when multiple approvals are pending on the same task —
+   operators care about tasks to clear, not approval rows to count.
+2. **Self-heal.** On every poll, any Task at status
+   `awaiting_approval` with zero pending approvals is moved to
+   `completed`. Costs one COUNT query per stuck task per poll,
+   typically zero stuck tasks once a workspace has been on v1.3.10+
+   for a few minutes. Heals legacy stuck rows lazily.
+
+### Tests (`tests/test_activity.py`)
+- Existing happy-path test updated to also seed a pending Approval
+  on the awaiting task (so the new source-of-truth lookup finds it).
+- NEW: stuck task with no pending approvals → not shown in awaiting,
+  AND self-healed to `completed` by the time the request returns.
+- NEW: task with two pending approvals shows as one row, not two
+  (operator-task model, not per-approval).
+
+137 tests passing.
+
+No migration. Once deployed, your Amber Sidney Hunt activity page
+should immediately read `AWAITING APPROVAL: 0` (matching the
+approvals queue) and the stuck `awaiting_approval` task will be
+auto-healed on the very next 5-second poll.
+
 ## v1.3.12 — Agents read real intake values instead of placeholders · 2026-05-20
 
 ### Fixed — drafts no longer say `[from intake]` for every field

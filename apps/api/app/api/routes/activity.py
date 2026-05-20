@@ -7,13 +7,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.applications import spec_for
 from app.db import get_db
-from app.models import AgentRun, Application, Client, Project, Task, User
+from app.models import AgentRun, Application, Approval, Client, Project, Task, User
+from app.models.approval import DECISION_PENDING
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -57,7 +58,8 @@ async def activity(
         ).all()
         client_id_by_project = {pid: cid for pid, cid in rows}
 
-    # ---- running_now + awaiting_approval -------------------------------
+    # ---- running_now ---------------------------------------------------
+    # Tasks where status='running' — an agent loop is actively firing tools.
     in_flight_rows = (
         await db.scalars(
             select(Task)
@@ -87,9 +89,73 @@ async def activity(
         }
 
     running_now = [_task_payload(t) for t in in_flight_rows if t.status == _RUNNING]
-    awaiting_approval = [
-        _task_payload(t) for t in in_flight_rows if t.status == _AWAITING
-    ]
+
+    # ---- awaiting_approval (sourced from PENDING APPROVALS, not Tasks) -
+    # Source of truth is the Approval queue, not Task.status — they can
+    # diverge if a task was decided before the v1.3.10 close-out fix
+    # deployed. Joining via Approval.decision='pending' is always
+    # honest about what's waiting on the operator.
+    pending_rows = list(
+        (
+            await db.execute(
+                select(Approval, Task, Project.client_id)
+                .join(Task, Task.id == Approval.task_id)
+                .join(Project, Project.id == Task.project_id)
+                .join(Client, Client.id == Project.client_id)
+                .where(
+                    Client.owner_id == user.id,
+                    Approval.decision == DECISION_PENDING,
+                )
+                .order_by(Approval.ts.desc())
+            )
+        ).all()
+    )
+    # Group by task so the operator sees one row per task even if a
+    # single task queued multiple approvals.
+    seen_task_ids: set[uuid.UUID] = set()
+    awaiting_approval: list[dict[str, object]] = []
+    for _appr, task, cid in pending_rows:
+        if task.id in seen_task_ids:
+            continue
+        seen_task_ids.add(task.id)
+        instruction = ""
+        if isinstance(task.input, dict):
+            instruction = str(
+                task.input.get("instruction") or task.input.get("objective") or ""
+            )
+        awaiting_approval.append(
+            {
+                "task_id": str(task.id),
+                "agent": task.agent,
+                "client_id": str(cid) if cid else None,
+                "client_name": name_by_client.get(cid, "—") if cid else "—",
+                "instruction": instruction[:240],
+                "status": task.status,
+                "started_at": task.created_at.isoformat() if task.created_at else None,
+            }
+        )
+
+    # ---- self-heal stuck tasks (lazy cleanup) --------------------------
+    # If any task has status='awaiting_approval' but no pending Approval
+    # rows attached (the legacy bug fixed in v1.3.10), move it to
+    # 'completed' so the data stays honest. Costs one COUNT per stuck
+    # task per poll; typically zero stuck tasks once the fix has been
+    # live for a while.
+    healed = 0
+    for t in in_flight_rows:
+        if t.status != _AWAITING:
+            continue
+        remaining = await db.scalar(
+            select(func.count(Approval.id)).where(
+                Approval.task_id == t.id,
+                Approval.decision == DECISION_PENDING,
+            )
+        )
+        if not remaining:
+            t.status = "completed"
+            healed += 1
+    if healed:
+        await db.commit()
 
     # ---- current_assignments (Applications agents have claimed) --------
     app_rows: list[Application] = []
