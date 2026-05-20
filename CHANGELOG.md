@@ -6,6 +6,29 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.5 — Click a task to read the agent's reply · 2026-05-20
+
+### Added — Expandable task rows
+Tasks list previously showed only `{agent} {instruction} {status}`
+— the agent's actual reply (stored in `task.output.text`) was
+invisible. Operators couldn't see what was drafted without
+inspecting the DB.
+
+Now: every task row is clickable. Clicking reveals:
+- The full **instruction** sent to the agent
+- The full **agent reply** (preformatted text, scrollable up to
+  ~96vh)
+- **Task ID** + **started timestamp** for grepping logs
+
+If the task hasn't run yet (status = queued) or only used T0/T1
+tools without producing a textual summary, the panel says so
+plainly instead of being empty.
+
+No backend changes — `TaskOut` already serialized `output: dict |
+None`; the frontend just wasn't reading it. The Task TypeScript
+type grew the `output` and `created_at` fields to match the
+serialized shape.
+
 ## v1.3.4 — Inline result panel under Next Steps · 2026-05-20
 
 ### Changed — Agent results now show INSIDE the Next Steps section

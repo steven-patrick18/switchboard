@@ -52,7 +52,9 @@ type Task = {
   id: string;
   agent: string;
   status: string;
-  input: Record<string, unknown> | null;
+  input: { instruction?: string; objective?: string } | null;
+  output: { text?: string } | null;
+  created_at: string;
 };
 type ClientMeta = { id: string; name: string; stage: string };
 type Audit = {
@@ -409,6 +411,8 @@ export default function ClientDetailPage() {
     url: string;
     new_secret: string;
   } | null>(null);
+  // Which task is currently expanded to show its agent reply.
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [docType, setDocType] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
@@ -1321,38 +1325,94 @@ export default function ClientDetailPage() {
           {tasks.length === 0 && (
             <li className="p-3 text-sm text-slate-500">No tasks.</li>
           )}
-          {tasks.map((t) => (
-            <li key={t.id} className="flex items-center justify-between p-3 text-sm">
-              <span>
-                <span className="font-medium">{t.agent}</span>{" "}
-                <span className="text-slate-500">
-                  {String(t.input?.objective ?? t.input?.instruction ?? "")}
-                </span>
-              </span>
-              <span className="flex items-center gap-3">
-                <span className="text-xs uppercase tracking-wide text-slate-500">
-                  {t.status}
-                </span>
-                {t.status === "queued" && t.agent !== "pm" && (
+          {tasks.map((t) => {
+            const expanded = expandedTaskId === t.id;
+            const replyText = t.output?.text ?? "";
+            const instructionText = String(
+              t.input?.objective ?? t.input?.instruction ?? "",
+            );
+            return (
+              <li key={t.id} className="p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <button
-                    disabled={busy}
                     onClick={() =>
-                      act(
-                        () =>
-                          apiFetch(`/clients/${id}/tasks/${t.id}/run`, {
-                            method: "POST",
-                          }),
-                        "Task run.",
-                      )
+                      setExpandedTaskId(expanded ? null : t.id)
                     }
-                    className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                    className="flex-1 text-left hover:text-slate-900"
+                    title="Click to show agent reply"
                   >
-                    Run
+                    <span className="font-medium">{t.agent}</span>{" "}
+                    <span className="text-slate-500">{instructionText}</span>
                   </button>
+                  <span className="flex items-center gap-3">
+                    <span className="text-xs uppercase tracking-wide text-slate-500">
+                      {t.status}
+                    </span>
+                    {t.output?.text && (
+                      <span className="text-xs text-slate-400">
+                        {expanded ? "▾" : "▸"}
+                      </span>
+                    )}
+                    {t.status === "queued" && t.agent !== "pm" && (
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          act(
+                            () =>
+                              apiFetch(`/clients/${id}/tasks/${t.id}/run`, {
+                                method: "POST",
+                              }),
+                            "Task run.",
+                          )
+                        }
+                        className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                      >
+                        Run
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {expanded && (
+                  <div className="mt-3 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+                    {instructionText && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Instruction sent to {t.agent}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-700 whitespace-pre-wrap">
+                          {instructionText}
+                        </p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Agent reply
+                      </p>
+                      {replyText ? (
+                        <pre className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap rounded border border-slate-200 bg-white p-3 text-xs text-slate-800">
+                          {replyText}
+                        </pre>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-500 italic">
+                          (no reply text recorded — either the task hasn&apos;t
+                          run yet, or the agent only used T0/T1 tools and
+                          didn&apos;t produce a textual summary.)
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      Task ID:{" "}
+                      <code className="rounded bg-slate-200 px-1">
+                        {t.id.slice(0, 8)}
+                      </code>{" "}
+                      · started{" "}
+                      {new Date(t.created_at).toLocaleString()}
+                    </p>
+                  </div>
                 )}
-              </span>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </section>
 
