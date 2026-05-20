@@ -18,12 +18,6 @@ from app.models.approval import Approval
 from app.models.client_intake import ClientIntake
 from app.models.credential import Credential
 from app.models.document import Document
-from app.pdf_builders import (
-    build_generic_filing_pdf,
-    build_letter_of_agency_pdf,
-    build_neca_ocn_2_pdf,
-)
-from app.storage import store_bytes
 
 
 async def _next_version(db: AsyncSession, client_id: uuid.UUID, doc_type: str) -> int:
@@ -75,134 +69,78 @@ async def _client_from_address(db: AsyncSession, client_id: uuid.UUID) -> str:
     return "[client email — add a 'client_email' credential in the vault]"
 
 
-async def _persist_pdf(
-    db: AsyncSession,
-    *,
-    client_id: uuid.UUID,
-    doc_type: str,
-    filename: str,
-    data: bytes,
-) -> Document:
-    """Content-address the PDF bytes, register a Document row pointing
-    at the on-disk artifact, and return it. Versioning matches the
-    rest of the Document Hub — bumping each time we regenerate."""
-    sha, size = store_bytes(data)
-    version = await _next_version(db, client_id, doc_type)
-    doc = Document(
-        client_id=client_id,
-        type=doc_type,
-        version=version,
-        s3_key=sha,
-        filename=filename,
-        mime="application/pdf",
-        size_bytes=size,
+# Per-form pointer to where the real agency form lives. Switchboard
+# does NOT generate or replicate these — they're proprietary templates
+# (NECA's logo, USAC's branding, per-state PUC layouts). The operator
+# downloads the authoritative PDF from the agency, fills it in with
+# the data the platform prepared, and attaches it to the outbound
+# email. Anything else risks the regulator rejecting a knock-off form.
+_REAL_FORM_SOURCES: dict[str, str] = {
+    "neca-ocn-2": (
+        "Download the official NECA Company Code Request Form from "
+        "https://www.neca.org/about/company-codes — fill in the values "
+        "shown above, scan the signed copy, then attach to this email "
+        "alongside the signed Letter of Agency."
+    ),
+    "neca": (
+        "Download the official NECA Company Code Request Form from "
+        "https://www.neca.org/about/company-codes ."
+    ),
+    "fcc 499-a": (
+        "FCC Form 499-A is filed through USAC E-File at "
+        "https://forms.universalservice.org — log in with the client's "
+        "FRN, complete the form using the values shown above, then "
+        "either submit through E-File or print + attach to this email."
+    ),
+    "fcc 499-q": (
+        "FCC Form 499-Q quarterly is filed through USAC E-File at "
+        "https://forms.universalservice.org ."
+    ),
+    "rmd": (
+        "RMD entries are filed in the FCC Robocall Mitigation Database "
+        "at https://fccprod.servicenowservices.com/rmd — use the values "
+        "shown above and follow the FCC's online flow."
+    ),
+    "section_214": (
+        "FCC Section 214 international authority is filed through the "
+        "FCC's electronic filing system. Use the values shown above."
+    ),
+}
+
+
+def _real_form_source(form: str) -> str:
+    fkey = (form or "").lower()
+    for key, msg in _REAL_FORM_SOURCES.items():
+        if fkey.startswith(key):
+            return msg
+    return (
+        f"Download the official {form} from the issuing agency's site, "
+        "fill it in using the values shown above, then attach to this "
+        "email."
     )
-    db.add(doc)
-    await db.flush()
-    return doc
-
-
-def _pdf_filename(form: str, legal_name: str | None, version: int) -> str:
-    """Sanitize for a filesystem-safe attachment name without losing
-    enough context that the operator can identify it."""
-    base = (legal_name or "client").strip()
-    safe_name = "".join(
-        c if c.isalnum() or c in "-_." else "_" for c in base
-    ).strip("_") or "client"
-    safe_form = "".join(
-        c if c.isalnum() or c in "-_." else "_" for c in form
-    ).strip("_") or "filing"
-    return f"{safe_form}__{safe_name}__v{version}.pdf"
-
-
-async def generate_filing_attachments(
-    approval: Approval, client_id: uuid.UUID, db: AsyncSession
-) -> list[dict]:
-    """Render the PDF(s) for an approved filing from its payload, persist
-    them via the Document Hub, set `approval.result_document_id`, and
-    return the attachments-list payload (one dict per PDF).
-
-    Called from `_execute_filing` (first time through) AND from
-    `/approvals/{id}/regenerate-attachments` (backfill for approvals
-    decided before PDF generation existed). Both paths produce the
-    same structure; the operator's experience downstream is identical."""
-    payload = approval.payload or {}
-    form = str(payload.get("form") or "filing")
-    legal_name, _ein, _ = await _intake_for(db, client_id)
-
-    attachments: list[dict] = []
-    fkey = form.lower()
-    if fkey.startswith("neca-ocn"):
-        # NECA-OCN-2 is a two-document package: the form + the LOA.
-        # Versioning bumps automatically; regenerate runs land as
-        # `v(N+1)` rather than overwriting the prior bytes — the
-        # forensic chain stays intact.
-        ocn_pdf = build_neca_ocn_2_pdf(payload, legal_name)
-        ocn_doc = await _persist_pdf(
-            db,
-            client_id=client_id,
-            doc_type=form,
-            filename=_pdf_filename(form, legal_name, 1),
-            data=ocn_pdf,
-        )
-        loa_pdf = build_letter_of_agency_pdf(payload, legal_name)
-        loa_doc = await _persist_pdf(
-            db,
-            client_id=client_id,
-            doc_type=f"{form}__LOA",
-            filename=_pdf_filename(f"{form}-LOA", legal_name, 1),
-            data=loa_pdf,
-        )
-        approval.result_document_id = ocn_doc.id
-        attachments = [
-            {
-                "document_id": str(ocn_doc.id),
-                "filename": ocn_doc.filename,
-                "mime": ocn_doc.mime,
-                "size_bytes": ocn_doc.size_bytes,
-            },
-            {
-                "document_id": str(loa_doc.id),
-                "filename": loa_doc.filename,
-                "mime": loa_doc.mime,
-                "size_bytes": loa_doc.size_bytes,
-            },
-        ]
-    else:
-        # FCC 499 / RMD / Section 214 / etc. — generic dump for now;
-        # add dedicated builders as each form gets templated.
-        generic_pdf = build_generic_filing_pdf(form, payload, legal_name)
-        gen_doc = await _persist_pdf(
-            db,
-            client_id=client_id,
-            doc_type=form,
-            filename=_pdf_filename(form, legal_name, 1),
-            data=generic_pdf,
-        )
-        approval.result_document_id = gen_doc.id
-        attachments = [
-            {
-                "document_id": str(gen_doc.id),
-                "filename": gen_doc.filename,
-                "mime": gen_doc.mime,
-                "size_bytes": gen_doc.size_bytes,
-            },
-        ]
-    return attachments
 
 
 async def _execute_filing(
     approval: Approval, client_id: uuid.UUID, db: AsyncSession
 ) -> str:
+    """Record a filing in the Document Hub and build the email packet.
+
+    The platform does NOT generate the real agency form — that's the
+    operator's job (download the authoritative template from the
+    agency, fill it in using the values shown in the approval card,
+    attach to the outbound email). What we keep on the Approval is
+    the structured data the operator copies from, plus a Document Hub
+    entry as the forensic record that this filing was approved at
+    this point in time."""
     payload = approval.payload or {}
     form = str(payload.get("form") or "filing")
-    legal_name, ein, _ = await _intake_for(db, client_id)
-    attachments = await generate_filing_attachments(approval, client_id, db)
+    version = await _next_version(db, client_id, form)
+    doc = Document(client_id=client_id, type=form, version=version)
+    db.add(doc)
+    await db.flush()
+    approval.result_document_id = doc.id
 
-    # Build the prefilled email packet so the operator can one-click
-    # send (or copy-paste) the filing. IMPORTANT: From line is the
-    # CLIENT, not Switchboard. The packet now carries attachment IDs
-    # so /send-email can read the bytes and attach them.
+    legal_name, ein, _ = await _intake_for(db, client_id)
     from_address = await _client_from_address(db, client_id)
     packet = build_email_packet(
         form=form,
@@ -212,18 +150,17 @@ async def _execute_filing(
         from_address=from_address,
         summary=str(payload.get("summary") or ""),
     ).to_json()
-    packet["attachments"] = attachments
+    # Replace the generic placeholder with a real, actionable pointer
+    # to the agency's authoritative form.
+    packet["attachments_note"] = _real_form_source(form)
     approval.email_packet = packet
 
-    primary_doc = await db.get(Document, approval.result_document_id)
-    primary_version = primary_doc.version if primary_doc else 1
-    file_summary = ", ".join(a["filename"] for a in attachments)
     return (
-        f"Recorded {form} (v{primary_version}) in the Document Hub with "
-        f"{len(attachments)} PDF attachment(s): {file_summary}. Email "
-        f"packet ready to send from the client's address. The external "
-        f"submission to the agency is performed by the operator (or, "
-        f"later, the integration layer)."
+        f"Recorded {form} (v{version}) in the Document Hub. The values "
+        f"the operator approved are preserved on this approval; the "
+        f"actual filing is submitted via the agency's authoritative "
+        f"form (downloaded from their site and filled in using these "
+        f"values)."
     )
 
 

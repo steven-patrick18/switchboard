@@ -6,6 +6,87 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.20 — Removed fake PDF generation, point to real agency forms · 2026-05-20
+
+### Reverted — Switchboard does not generate regulator forms anymore
+v1.3.18/v1.3.19 generated PDFs from the agent's payload and labeled
+them "NECA-OCN-2.pdf" + "Letter of Agency.pdf". Comparing them to
+the actual NECA **Company Code Request Form** (which the operator
+shared as a real-world example) revealed they were nothing like the
+real document:
+
+- Wrong title ("NECA Form OCN-2" vs. the actual "Company Code
+  Request Form")
+- Missing the NECA logo and branding
+- Wrong section layout (real form has REQUESTOR + COMPANY
+  INFORMATION blocks with specific fields; mine had a generic
+  applicant data dump)
+- Missing the service category table (CAP / ETHX / CLEC / IC /
+  IPES / LRSL / PCS / PCSR / ULEC / WIRE / WRSL with check-marks)
+- Missing the iconectiv "Agent for Service of Process" notice
+- Generally a knock-off that would be rejected by NECA
+
+Replicating these forms exactly isn't feasible — they're each the
+agency's proprietary template, downloaded from their site, designed
+to be the authoritative artifact of record. Pretending we generate
+them is misleading and worse than not generating anything.
+
+### What got removed
+- `app/pdf_builders.py` — deleted (was generating non-conformant PDFs)
+- `_execute_filing` PDF generation — now back to metadata-only
+  `Document` rows (forensic record + version increment, no fake
+  bytes)
+- `POST /approvals/{id}/regenerate-attachments` — endpoint removed
+- `email_packet.attachments` — no longer populated by the executor
+- The send-email endpoint no longer attempts to load attachment
+  bytes from storage; emails are body-only
+- `tests/test_pdf_attachments.py` and
+  `tests/test_regenerate_attachments.py` — deleted (11 tests)
+- UI: Regenerate PDFs callout, attachment list, preview/download
+  buttons — all removed from `ApprovalCard.tsx`
+
+### What replaced it
+Each filing's email packet now has a real, actionable
+`attachments_note` pointing the operator to the agency's
+authoritative form:
+
+- **NECA-OCN-2** → *"Download the official NECA Company Code Request
+  Form from https://www.neca.org/about/company-codes — fill in the
+  values shown above, scan the signed copy, then attach to this
+  email alongside the signed Letter of Agency."*
+- **FCC 499-A/Q** → *"FCC Form 499-A is filed through USAC E-File
+  at https://forms.universalservice.org — log in with the client's
+  FRN, complete the form using the values shown above, then either
+  submit through E-File or print + attach to this email."*
+- **RMD** → *"RMD entries are filed in the FCC Robocall Mitigation
+  Database at https://fccprod.servicenowservices.com/rmd ."*
+- **Section 214 / generic** — per-form pointers in
+  `app/execution._REAL_FORM_SOURCES`
+
+The approval card has a small amber callout right under the email
+packet explaining: *"Switchboard does not generate NECA/FCC/state
+forms — those are the agency's proprietary templates and a knock-off
+would be rejected. Download the official form from the link in the
+Attachments note below, fill it in using the values shown above,
+then drop the signed/scanned copy on this email from your own
+client (Gmail / Outlook / etc.) before forwarding the conversation
+back."*
+
+### What stays
+The platform's actual value is unchanged:
+- Carrier agent reads intake, looks up the FRN via CORES, drafts
+  the structured filing payload
+- Approval card shows the values clearly + the small "things the
+  agent needs from you" form for any `[TBD]` fields
+- Email packet has the right To/From/Subject/Body, From = the
+  client's address via stored SMTP credential
+- Send via email ▸ + Reply received? loop still works for
+  body-only correspondence
+- Document Hub still tracks each approved filing as a versioned
+  record (without the fake PDF bytes)
+
+158 tests passing. `tsc --noEmit` clean.
+
 ## v1.3.19 — Backfill PDFs onto pre-v1.3.18 approvals · 2026-05-20
 
 ### Fixed — "no file" Document Hub rows can be repaired in one click

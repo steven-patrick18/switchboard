@@ -407,61 +407,6 @@ async def send_back(
     )
 
 
-@router.post("/{approval_id}/regenerate-attachments", response_model=ApprovalOut)
-async def regenerate_attachments(
-    approval_id: uuid.UUID,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> ApprovalOut:
-    """Re-run PDF generation on a decided approval — the backfill path
-    for approvals decided BEFORE v1.3.18 added PDF generation. Those
-    approvals have email_packet but no attachments (or attachments
-    pointing at no-file Document stubs); the operator needs real PDFs
-    to mail to the regulator.
-
-    This re-uses the same `generate_filing_attachments` helper that
-    `_execute_filing` runs on the first approval, so the rebuilt
-    package is byte-identical to what a freshly-approved filing would
-    have produced. Audited as `approval.attachments_regenerated`."""
-    from app.execution import generate_filing_attachments  # noqa: PLC0415
-
-    approval, client = await _load_owned(approval_id, user, db)
-    if approval.action_type != "queue_filing_submission":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Only filings (queue_filing_submission) carry mailable "
-                "PDF attachments. This approval is a "
-                f"{approval.action_type}."
-            ),
-        )
-    if not approval.payload:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Approval has no payload to render.",
-        )
-
-    attachments = await generate_filing_attachments(approval, client.id, db)
-    # Merge into the existing email_packet (preserve to/subject/body
-    # the operator may have already tweaked).
-    packet = dict(approval.email_packet or {})
-    packet["attachments"] = attachments
-    approval.email_packet = packet
-    await record_audit(
-        db,
-        actor=user.email,
-        action="approval.attachments_regenerated",
-        subject=f"approval:{approval.id}",
-        client_id=client.id,
-        after={
-            "attachments": [a.get("filename") for a in attachments],
-            "count": len(attachments),
-        },
-    )
-    await db.commit()
-    return _out(approval, client)
-
-
 @router.post("/{approval_id}/send-email", response_model=SendEmailResult)
 async def send_email_for_approval(
     approval_id: uuid.UUID,
@@ -477,9 +422,7 @@ async def send_email_for_approval(
     inbound replies back to the same approval. Audited as
     `approval.emailed`. Fails gracefully with a 400 if SMTP isn't
     configured — the UI can then fall back to its copy-paste path."""
-    from app.models import Document  # noqa: PLC0415
     from app.notifications import send_email_now, send_via_client_smtp  # noqa: PLC0415
-    from app.storage import read_bytes  # noqa: PLC0415
 
     approval, client = await _load_owned(approval_id, user, db)
     packet = approval.email_packet or {}
@@ -500,28 +443,10 @@ async def send_email_for_approval(
             detail=f"Recipient is still a placeholder ({to}); override 'to' in the request.",
         )
 
-    # Load attachment bytes from the Document Hub. Filings live here
-    # content-addressed; we ship them inline with the email so the
-    # regulator gets the actual PDFs (not just prose).
-    attachments: list[tuple[str, bytes, str]] = []
-    for ref in packet.get("attachments") or []:
-        if not isinstance(ref, dict):
-            continue
-        try:
-            doc_id = uuid.UUID(str(ref.get("document_id")))
-        except (TypeError, ValueError):
-            continue
-        doc = await db.get(Document, doc_id)
-        if doc is None or doc.client_id != client.id or not doc.s3_key:
-            continue
-        try:
-            data = read_bytes(doc.s3_key)
-        except OSError:
-            continue
-        attachments.append(
-            (doc.filename or f"{doc.type}.bin", data, doc.mime or "application/pdf")
-        )
-
+    # Body-only email: the operator attaches the filled-in real
+    # agency form themselves (downloaded from neca.org / usac.org /
+    # the state PUC). Switchboard does NOT generate the regulator's
+    # form because the resulting knock-off would be rejected.
     if body.via == "client":
         sent, message_id, error = await send_via_client_smtp(
             db,
@@ -531,7 +456,6 @@ async def send_email_for_approval(
             subject=subject,
             body=body_text,
             cc=cc,
-            attachments=attachments,
         )
         sender_path = "client"
     else:

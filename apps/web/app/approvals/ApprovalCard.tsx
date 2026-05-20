@@ -2,14 +2,7 @@
 
 import { useState } from "react";
 
-import { apiFetch, downloadFile, previewFile } from "@/lib/api";
-
-export type EmailAttachment = {
-  document_id: string;
-  filename: string;
-  mime: string | null;
-  size_bytes: number | null;
-};
+import { apiFetch } from "@/lib/api";
 
 export type EmailPacket = {
   to: string;
@@ -18,7 +11,6 @@ export type EmailPacket = {
   body: string;
   cc: string[] | null;
   attachments_note: string | null;
-  attachments?: EmailAttachment[];
 };
 
 export type Approval = {
@@ -278,26 +270,6 @@ export default function ApprovalCard({
       await navigator.clipboard.writeText(s);
     } catch {
       /* clipboard blocked — operator can select + copy manually */
-    }
-  }
-
-  async function regenerateAttachments() {
-    setBusy(true);
-    setErr(null);
-    try {
-      await apiFetch<Approval>(
-        `/approvals/${approval.id}/regenerate-attachments`,
-        { method: "POST" },
-      );
-      onChanged();
-    } catch (e) {
-      setErr(
-        e instanceof Error
-          ? e.message
-          : "Could not regenerate PDFs — try again.",
-      );
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -578,87 +550,19 @@ export default function ApprovalCard({
                   {initialPacket.attachments_note}
                 </p>
               )}
-              {approval.action_type === "queue_filing_submission" &&
-                (!initialPacket.attachments ||
-                  initialPacket.attachments.length === 0) && (
-                  <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs">
-                    <p className="font-semibold text-amber-900">
-                      No PDFs attached to this filing yet.
-                    </p>
-                    <p className="mt-0.5 text-amber-800">
-                      This approval was decided before PDF generation
-                      existed (or the regenerator hasn&apos;t run yet).
-                      Click below to render the NECA-OCN-2 + Letter of
-                      Agency PDFs from the saved payload — no Anthropic
-                      call needed.
-                    </p>
-                    <button
-                      onClick={regenerateAttachments}
-                      disabled={busy}
-                      className="mt-2 rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-                    >
-                      {busy ? "Regenerating…" : "Regenerate PDFs ▸"}
-                    </button>
-                  </div>
-                )}
-              {initialPacket.attachments &&
-                initialPacket.attachments.length > 0 && (
-                  <div className="mt-2">
-                    <p className="text-xs font-semibold text-slate-600">
-                      Generated PDFs (attached to the email when you Send):
-                    </p>
-                    <ul className="mt-1 space-y-1">
-                      {initialPacket.attachments.map((a) => (
-                        <li
-                          key={a.document_id}
-                          className="flex items-center gap-3 rounded-md border border-slate-200 bg-white p-2 text-xs"
-                        >
-                          <span className="font-mono">📎 {a.filename}</span>
-                          {a.size_bytes ? (
-                            <span className="text-slate-500">
-                              {(a.size_bytes / 1024).toFixed(1)} KB
-                            </span>
-                          ) : null}
-                          <span className="ml-auto flex gap-2">
-                            <button
-                              onClick={() =>
-                                previewFile(
-                                  `/clients/${approval.client_id}/documents/${a.document_id}/download`,
-                                ).catch((e) =>
-                                  setErr(
-                                    e instanceof Error
-                                      ? e.message
-                                      : "Preview failed",
-                                  ),
-                                )
-                              }
-                              className="text-slate-700 underline"
-                            >
-                              preview ↗
-                            </button>
-                            <button
-                              onClick={() =>
-                                downloadFile(
-                                  `/clients/${approval.client_id}/documents/${a.document_id}/download?dl=1`,
-                                  a.filename,
-                                ).catch((e) =>
-                                  setErr(
-                                    e instanceof Error
-                                      ? e.message
-                                      : "Download failed",
-                                  ),
-                                )
-                              }
-                              className="text-slate-700 underline"
-                            >
-                              download ↓
-                            </button>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+              {approval.action_type === "queue_filing_submission" && (
+                <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                  <strong>Attach the real agency form before sending.</strong>{" "}
+                  Switchboard does not generate NECA/FCC/state forms —
+                  those are the agency&apos;s proprietary templates and a
+                  knock-off would be rejected. Download the official form
+                  from the link in the &quot;Attachments&quot; note below, fill
+                  it in using the values shown above, then drop the
+                  signed/scanned copy on this email from your own client
+                  (Gmail / Outlook / etc.) before forwarding the
+                  conversation back.
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   onClick={sendEmail}
