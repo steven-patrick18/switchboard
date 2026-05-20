@@ -31,6 +31,18 @@ _ENTRIES: tuple[ActionSpec, ...] = (
     ),
     ActionSpec(
         service="fcc_cores",
+        action="lookup_frn",
+        label="FCC CORES — look up FRN by entity",
+        description=(
+            "Retrieve the client's existing 10-digit FRN from CORES by "
+            "legal entity name + EIN. Used by the carrier agent so it "
+            "can fill the real FRN into NECA-OCN-2 instead of asking "
+            "the operator. Read-only."
+        ),
+        required_params=("legal_name", "ein"),
+    ),
+    ActionSpec(
+        service="fcc_cores",
         action="submit_499_q",
         label="FCC CORES — submit Form 499-Q",
         description="Submit the quarterly Form 499-Q on the client's behalf.",

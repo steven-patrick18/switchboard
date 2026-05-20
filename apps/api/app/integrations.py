@@ -46,8 +46,44 @@ async def _demo_fcc_check_filer_status(
     )
 
 
+async def _demo_fcc_lookup_frn(_secret: str, params: dict) -> IntegrationResult:
+    """Deterministic synthetic FRN for the demo backend. The real
+    Playwright backend will scrape CORES with the same shape — every
+    consumer (carrier agent, executor, audit) sees the same fields
+    regardless of which backend is live."""
+    legal_name = str(params.get("legal_name") or "").strip()
+    ein = str(params.get("ein") or "").strip()
+    if not (legal_name and ein):
+        return IntegrationResult(
+            status="MISSING_PARAMS",
+            detail={"missing": [k for k in ("legal_name", "ein") if not params.get(k)]},
+            backend="demo",
+        )
+    # Synthetic but deterministic so re-runs are idempotent: zero-pad
+    # the last digits of EIN into a 10-digit FRN. Real backend will
+    # replace this with a CORES query.
+    digits = "".join(c for c in ein if c.isdigit())
+    frn = ("0" * 10 + digits)[-10:]
+    return IntegrationResult(
+        status="FOUND",
+        detail={
+            "frn": frn,
+            "legal_name": legal_name,
+            "ein": ein,
+            "cores_status": "ACTIVE",
+            "note": (
+                "Demo backend: synthetic FRN derived from EIN. The real "
+                "CORES integration will replace this with the live "
+                "registered FRN."
+            ),
+        },
+        backend="demo",
+    )
+
+
 _DEMO_HANDLERS: dict[tuple[str, str], Handler] = {
     ("fcc_cores", "check_filer_status"): _demo_fcc_check_filer_status,
+    ("fcc_cores", "lookup_frn"): _demo_fcc_lookup_frn,
 }
 
 

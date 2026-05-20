@@ -6,6 +6,60 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.11 — Carrier agent looks up the FRN itself · 2026-05-20
+
+### Fixed — carrier agent no longer asks the operator for the FRN
+Last round (v1.3.9 / v1.3.10) made the carrier agent always queue
+the NECA-OCN-2 draft with `[FRN: TBD]` for the operator to fill in.
+That solved the stalling problem but missed the cleaner answer:
+**the FCC CORES credential is already in the vault, the agent
+already has `request_portal_action` in its toolset, and in
+autonomous mode T2 actions auto-execute**. The agent should look
+up the FRN itself instead of asking.
+
+The gap was in the portal-action catalog: `check_filer_status`
+needs you to already know the FRN, and `register_filer_id` is for
+brand-new entities. There was no "look up the FRN we have on file"
+action.
+
+New `fcc_cores:lookup_frn` portal action (T2, read-only):
+- params: `legal_name`, `ein` (both required)
+- returns: 10-digit FRN + CORES status
+
+Demo backend handler returns a deterministic synthetic FRN derived
+from the EIN digits — re-runs are idempotent, and when the real
+Playwright/HTTP backend lands later the shape is unchanged so the
+carrier agent + executor + audit trail need zero changes.
+
+### Carrier agent prompt — explicit lookup_frn-first workflow
+The carrier prompt now spells out a 4-step OCN drafting flow:
+1. If the FRN is needed and unknown, call
+   `request_portal_action(service='fcc_cores',
+   action='lookup_frn', params={legal_name, ein})` first. In
+   autonomous mode this auto-executes; in supervised it queues a
+   quick T2. Use the returned FRN.
+2. Produce the full NECA-OCN-2 + LOA package using intake +
+   looked-up FRN.
+3. Only mark as `[TBD]` the things you genuinely cannot read
+   (e.g. a requested OCN block range).
+4. ALWAYS call `queue_filing_submission` for the T3 approval.
+
+### Tests (`tests/test_lookup_frn.py`)
+- Catalog entry exists at tier T2 with the right required params.
+- `missing_params` correctly flags missing legal_name / ein.
+- Demo handler returns `FOUND` with a 10-digit FRN derived from
+  EIN and is deterministic across calls.
+- Missing-params path returns `MISSING_PARAMS` with the list.
+- Regression: carrier prompt explicitly mentions `lookup_frn`,
+  `fcc_cores`, BIAS TOWARD ACTION, and the never-punt rule.
+
+129 tests passing.
+
+No migration. Once deployed, hitting Start ▸ on OCN with autonomy
+on Amano Telecom will: auto-execute `lookup_frn` against CORES →
+read the real FRN back → produce the NECA-OCN-2 package with the
+real FRN inline → queue T3 approval for your sign-off.
+
 ## v1.3.10 — Tighter correction loop + stale Live-Activity fix · 2026-05-20
 
 ### Fixed — Task close-out (Live Activity no longer shows phantom rows)
