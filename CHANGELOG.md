@@ -6,6 +6,38 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.17 — Approval queue: filter Pending / Decided / All · 2026-05-20
+
+### Fixed — operators can finally find decided approvals
+The `/approvals` page filters were Client + Action-Type only. The
+backend route always supported `?decision=pending|decided|all` but
+the UI never surfaced it. So once an operator approved a filing
+(NECA-OCN-2, FCC 499, etc.), they had no way to find it again from
+the GUI to click **Send via email ▸** on the Email packet — they
+had to type the URL by hand or go through `/history` (audit-only,
+no card).
+
+This was the immediate cause of Amber Sidney Hunt onboarding
+feeling stuck: 4 approved NECA-OCN-2 drafts existed but the
+operator couldn't open them to actually mail to NECA.
+
+### What's new on /approvals
+- A new **Decision** dropdown next to the client / action_type
+  filters: `Pending` (default) / `Decided (approved / rejected /
+  edited)` / `All`.
+- Header count now reflects the filter — "3 decided" instead of
+  always "0 pending".
+- When `Decided` is selected, an inline callout appears: *"You're
+  looking at decided approvals — these have already been
+  approved/edited/rejected. Open one and scroll to **Email packet**
+  to mail the filing out via the client's SMTP."*
+- Empty-state copy adapts to whichever filter is selected.
+- `Clear filters` resets all three filters back to defaults.
+
+Verified end-to-end in the running preview: all three filter
+states (Pending / Decided / All) render correctly with the right
+header count and the right callout. `tsc --noEmit` clean.
+
 ## v1.3.16 — Approval card asks for ONLY what the agent doesn't know · 2026-05-20
 
 ### Fixed — no more 100-line JSON wall for two missing fields

@@ -19,6 +19,13 @@ export default function ApprovalsPage() {
   const [batchNote, setBatchNote] = useState("");
   const [filterClient, setFilterClient] = useState("");
   const [filterAction, setFilterAction] = useState("");
+  // 'pending' = needs my decision (default landing view).
+  // 'decided' = approve/edit/reject — where you go to actually click
+  // "Send via email" on a filing that's already through the gate.
+  // 'all'     = unfiltered, debug-style.
+  const [filterDecision, setFilterDecision] = useState<
+    "pending" | "decided" | "all"
+  >("pending");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +34,8 @@ export default function ApprovalsPage() {
       const qs = new URLSearchParams();
       if (filterClient) qs.set("client_id", filterClient);
       if (filterAction.trim()) qs.set("action_type", filterAction.trim());
-      const url = qs.toString() ? `/approvals?${qs}` : "/approvals";
+      qs.set("decision", filterDecision);
+      const url = `/approvals?${qs}`;
       const list = await apiFetch<Approval[]>(url);
       setItems(list);
       setSelected(new Set());
@@ -36,7 +44,7 @@ export default function ApprovalsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterClient, filterAction]);
+  }, [filterClient, filterAction, filterDecision]);
 
   // Sidebar data (clients + portal-action catalog) loads once; queue
   // reloads whenever a filter changes.
@@ -92,7 +100,17 @@ export default function ApprovalsPage() {
     }
   }
 
-  const hasFilters = filterClient !== "" || filterAction.trim() !== "";
+  const hasFilters =
+    filterClient !== "" ||
+    filterAction.trim() !== "" ||
+    filterDecision !== "pending";
+
+  const headerCount =
+    filterDecision === "pending"
+      ? `${items.length} pending`
+      : filterDecision === "decided"
+        ? `${items.length} decided`
+        : `${items.length} total`;
 
   return (
     <AppShell>
@@ -100,10 +118,24 @@ export default function ApprovalsPage() {
         <h1 className="text-2xl font-semibold text-slate-900">
           Approval queue
         </h1>
-        <span className="text-sm text-slate-500">{items.length} pending</span>
+        <span className="text-sm text-slate-500">{headerCount}</span>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[auto_1fr_1fr_auto]">
+        <select
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          value={filterDecision}
+          onChange={(e) =>
+            setFilterDecision(
+              e.target.value as "pending" | "decided" | "all",
+            )
+          }
+          title="pending = needs your decision · decided = already approved/rejected/edited (where you go to send the email out) · all = both"
+        >
+          <option value="pending">Pending</option>
+          <option value="decided">Decided (approved / rejected / edited)</option>
+          <option value="all">All</option>
+        </select>
         <select
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
           value={filterClient}
@@ -126,6 +158,7 @@ export default function ApprovalsPage() {
           onClick={() => {
             setFilterClient("");
             setFilterAction("");
+            setFilterDecision("pending");
           }}
           disabled={!hasFilters}
           className="rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
@@ -133,6 +166,15 @@ export default function ApprovalsPage() {
           Clear filters
         </button>
       </div>
+
+      {filterDecision === "decided" && (
+        <p className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+          You&apos;re looking at <strong>decided</strong> approvals — these
+          have already been approved/edited/rejected. Open one and scroll
+          to <strong>Email packet</strong> to mail the filing out via the
+          client&apos;s SMTP.
+        </p>
+      )}
 
       {selected.size > 0 && (
         <div className="sticky top-0 z-10 mt-4 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-sm">
@@ -164,9 +206,13 @@ export default function ApprovalsPage() {
         {loading && <li className="text-sm text-slate-500">Loading...</li>}
         {!loading && items.length === 0 && (
           <li className="rounded-lg border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
-            {hasFilters
-              ? "No pending approvals match those filters."
-              : "Queue is clear. Nothing waiting on you."}
+            {filterDecision === "pending"
+              ? hasFilters
+                ? "No pending approvals match those filters."
+                : "Queue is clear. Nothing waiting on you."
+              : filterDecision === "decided"
+                ? "No decided approvals match those filters yet. Approve one in the pending queue and it'll show up here."
+                : "No approvals match those filters."}
           </li>
         )}
         {items.map((a) => (
