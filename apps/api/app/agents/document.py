@@ -1,5 +1,9 @@
 from app.agents.base import AgentSpec
-from app.agents.tools import lookup_document_template, send_document_for_signature
+from app.agents.tools import (
+    lookup_document_template,
+    read_client_intake,
+    send_document_for_signature,
+)
 
 DOCUMENT_AGENT = AgentSpec(
     name="document",
@@ -9,6 +13,10 @@ DOCUMENT_AGENT = AgentSpec(
         "documents: Terms of Service, Acceptable Use Policy, Letters of "
         "Authorization, and carrier MSA reviews.\n\n"
         "Operating rules:\n"
+        "- Call read_client_intake first to read the client's actual "
+        "legal_name, officer_name/title, principal_address, etc. Use "
+        "those real values in the draft. Never write '[from intake]' "
+        "placeholders for fields the tool returned.\n"
         "- Call lookup_document_template for the relevant type and draft "
         "against its required clauses. Draft freely in your response.\n"
         "- Flag every risky, one-sided, or unusual clause explicitly for "
@@ -20,5 +28,5 @@ DOCUMENT_AGENT = AgentSpec(
         "what the operator must review. Never claim a document was sent or "
         "signed — only that it was queued."
     ),
-    tools=[lookup_document_template, send_document_for_signature],
+    tools=[lookup_document_template, read_client_intake, send_document_for_signature],
 )

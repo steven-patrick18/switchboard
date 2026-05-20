@@ -3,6 +3,7 @@ from app.agents.tools import (
     check_client_credentials,
     check_intake_status,
     draft_client_email,
+    read_client_intake,
     update_application_stage,
 )
 
@@ -29,6 +30,7 @@ INTAKE_AGENT = AgentSpec(
     ),
     tools=[
         check_intake_status,
+        read_client_intake,
         check_client_credentials,
         draft_client_email,
         update_application_stage,

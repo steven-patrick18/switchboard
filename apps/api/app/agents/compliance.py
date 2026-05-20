@@ -3,6 +3,7 @@ from app.agents.tools import (
     check_client_credentials,
     lookup_fcc_requirement,
     queue_filing_submission,
+    read_client_intake,
     request_portal_action,
     update_application_stage,
 )
@@ -22,6 +23,11 @@ COMPLIANCE_AGENT = AgentSpec(
         "CORES (FRN) → OCN → FCC 499 → RMD → STIR/SHAKEN. CORES comes "
         "FIRST because the FRN is required on every other FCC filing "
         "AND on the NECA OCN form. Never queue 499 without an FRN.\n"
+        "- Before drafting ANY filing, call read_client_intake to get "
+        "the real legal_name, EIN, officer info, address, etc. Use "
+        "those values verbatim. Never write '[from intake]' or "
+        "'[from client intake]' placeholders for fields the tool "
+        "returned — the operator already gave us those values.\n"
         "- Use lookup_fcc_requirement to ground every claim in the "
         "cached reference before advising.\n"
         "- Use update_application_stage to mark your progress on each "
@@ -40,6 +46,7 @@ COMPLIANCE_AGENT = AgentSpec(
     tools=[
         lookup_fcc_requirement,
         check_client_credentials,
+        read_client_intake,
         queue_filing_submission,
         request_portal_action,
         update_application_stage,

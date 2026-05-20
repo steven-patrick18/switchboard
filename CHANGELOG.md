@@ -6,6 +6,60 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.12 — Agents read real intake values instead of placeholders · 2026-05-20
+
+### Fixed — drafts no longer say `[from intake]` for every field
+Looking at the v1.3.11 carrier NECA-OCN-2 draft on Amber Sidney
+Hunt's approval queue, every field except the explicit TBDs was
+also a placeholder: `"applicant_legal_name": "[from client intake
+— operator confirm]"`, `"dba": "[from client intake]"`, etc. Root
+cause: the filing-drafting agents (carrier, compliance, etc.)
+had **no tool to read the actual intake field values**. The
+existing `check_intake_status` returns completeness ("missing
+fields: X, Y") but never the values themselves. So the agent
+correctly knew the values existed but couldn't quote them.
+
+### Added — `read_client_intake` tool (T0, read-only)
+Returns the captured intake as a structured JSON blob: legal_name,
+entity_type, formation_state, ein, principal_address, officer_*,
+primary_contact_*, target_states, intends_international,
+estimated_monthly_revenue, ocn, extra. Wired into:
+
+- **carrier** — prompt now reads `read_client_intake` as **step 1**
+  of the OCN drafting flow, then `lookup_frn` as step 2, then
+  drafts NECA-OCN-2 + LOA with real values, then queues T3.
+- **compliance** — prompt says "Before drafting ANY filing, call
+  read_client_intake."
+- **state_licensing** — same: call it before any state CPCN draft.
+- **document** — same: real values in TOS / AUP / LOA drafts.
+- **intake** — has it too (read-then-decide patterns).
+
+The prompts all explicitly forbid `[from intake]` placeholders
+for fields the tool returned.
+
+### Tests (`tests/test_read_client_intake.py`)
+- Tool returns real values (legal_name, ein, officer email,
+  target_states) for a seeded client.
+- Brand-new client with no intake row → plain-English message,
+  not a traceback.
+- No client context → safe degradation.
+- Registered in `ALL_TOOLS` so the GUI agent-builder catalog
+  sees it.
+- All five filing-drafting agents have it in their toolset.
+- Carrier prompt regression: explicitly references
+  `read_client_intake`, "FIRST", `lookup_frn`, BIAS TOWARD ACTION.
+
+135 tests passing.
+
+### Immediate workaround for the current pending OCN approval
+Until the new deploy lands, the approval card you have open is in
+edit mode — you can just edit the JSON directly: replace each
+`"[from client intake]"` string with the actual value from the
+client's intake page, replace `"frn": "[TBD …]"` with the real
+10-digit FRN, and click **Save & approve**. That records as
+`edited` (vs `approved`) and audits the diff. Future drafts after
+this deploy will arrive with real values inline.
+
 ## v1.3.11 — Carrier agent looks up the FRN itself · 2026-05-20
 
 ### Fixed — carrier agent no longer asks the operator for the FRN

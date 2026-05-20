@@ -3,6 +3,7 @@ from app.agents.tools import (
     check_client_credentials,
     lookup_state_requirement,
     queue_filing_submission,
+    read_client_intake,
     request_portal_action,
     update_application_stage,
 )
@@ -16,6 +17,10 @@ STATE_LICENSING_AGENT = AgentSpec(
         "bonds. ~50 distinct state processes — each has its own form, "
         "timeline, and bond requirement.\n\n"
         "Operating rules:\n"
+        "- Call read_client_intake first to get the real legal_name, "
+        "EIN, officer info, address, target_states, etc. Use those "
+        "values verbatim — never write '[from intake]' placeholders "
+        "for fields the tool returned.\n"
         "- Use lookup_state_requirement on every state the client is "
         "targeting BEFORE drafting any filing — never assume two states "
         "have the same rules.\n"
@@ -30,6 +35,7 @@ STATE_LICENSING_AGENT = AgentSpec(
     tools=[
         lookup_state_requirement,
         check_client_credentials,
+        read_client_intake,
         queue_filing_submission,
         request_portal_action,
         update_application_stage,

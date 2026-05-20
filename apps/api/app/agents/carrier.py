@@ -3,6 +3,7 @@ from app.agents.tools import (
     check_client_credentials,
     lookup_carrier_specs,
     queue_filing_submission,
+    read_client_intake,
     request_portal_action,
     update_application_stage,
 )
@@ -31,24 +32,30 @@ CARRIER_AGENT = AgentSpec(
         "BIAS TOWARD ACTION. When asked to draft a filing (e.g. "
         "NECA-OCN-2), do not stall waiting on operator confirmation of "
         "individual fields. Take these steps in order:\n"
-        "  1. If the FRN is needed and you do not already know it, "
-        "FIRST call request_portal_action with service='fcc_cores', "
-        "action='lookup_frn', params={'legal_name': <intake legal "
-        "name>, 'ein': <intake EIN>}. This is a tier-2 read-only "
-        "lookup; in autonomous mode it auto-executes and the result "
-        "contains the live FRN. In supervised mode it queues a quick "
-        "T2 approval — that is fine, just queue it and proceed. Use "
-        "the returned 'frn' field in the NECA-OCN-2 draft. Do NOT "
-        "ask the operator to confirm the FRN — your own credential "
-        "lookup is the source of truth.\n"
-        "  2. Produce the full document package in your reply "
-        "(NECA-OCN-2 form data + Letter of Agency) using intake data "
-        "+ the looked-up FRN.\n"
-        "  3. For any remaining unknowns you genuinely cannot read "
-        "(e.g. a requested OCN block range the operator hasn't "
-        "specified), write '[TBD — operator fills at approval]' as "
-        "the placeholder.\n"
-        "  4. ALWAYS call queue_filing_submission with "
+        "  1. Call read_client_intake FIRST. It returns the actual "
+        "captured values (legal_name, ein, formation_state, "
+        "principal_address, officer_name/title/email, primary_contact_*, "
+        "target_states, etc.). Use these REAL VALUES verbatim in your "
+        "draft — never write '[from intake]' or '[from client intake — "
+        "operator confirm]' style placeholders for anything the tool "
+        "returned. The operator already gave us these values; quoting "
+        "them back as placeholders is a bug.\n"
+        "  2. If the FRN is needed and not already in intake, call "
+        "request_portal_action with service='fcc_cores', "
+        "action='lookup_frn', params={'legal_name': <from step 1>, "
+        "'ein': <from step 1>}. This is a tier-2 read-only lookup; in "
+        "autonomous mode it auto-executes and the result contains the "
+        "live FRN. In supervised mode it queues a quick T2 approval — "
+        "that is fine, proceed once it's queued. Do NOT ask the "
+        "operator to confirm the FRN.\n"
+        "  3. Produce the full document package in your reply "
+        "(NECA-OCN-2 form data + Letter of Agency) with the real "
+        "values from step 1 and the looked-up FRN from step 2.\n"
+        "  4. Only use '[TBD — operator fills at approval]' for "
+        "fields you genuinely cannot read (e.g. a requested OCN block "
+        "range the operator hasn't specified). NEVER use TBD for "
+        "anything read_client_intake returned.\n"
+        "  5. ALWAYS call queue_filing_submission with "
         "form='NECA-OCN-2' so a tier-3 approval is created — the "
         "operator can edit any remaining TBD field before approving.\n"
         "NEVER end your turn without queueing the filing when the "
@@ -75,6 +82,7 @@ CARRIER_AGENT = AgentSpec(
     tools=[
         lookup_carrier_specs,
         check_client_credentials,
+        read_client_intake,
         queue_filing_submission,
         request_portal_action,
         update_application_stage,

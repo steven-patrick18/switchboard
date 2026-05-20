@@ -355,6 +355,69 @@ check_intake_status = Tool(
 )
 
 
+async def _read_client_intake(_args: dict, ctx: ToolContext) -> str:
+    """Return the actual intake field values as JSON. Distinct from
+    check_intake_status (which only says what's missing) — this is how
+    an agent reads the legal_name, EIN, officer info, etc. it needs to
+    fill into a filing. Without this tool, drafts end up full of
+    '[from intake]' string placeholders. Read-only; T0."""
+    import json  # noqa: PLC0415
+
+    if ctx.client_id is None:
+        return "No client context — cannot read intake."
+    intake = await ctx.db.scalar(
+        select(ClientIntake).where(ClientIntake.client_id == ctx.client_id)
+    )
+    if intake is None:
+        return (
+            "No intake row for this client yet. The operator must fill "
+            "in basic entity data before any filing can be drafted."
+        )
+    payload = {
+        "legal_name": intake.legal_name,
+        "entity_type": intake.entity_type,
+        "formation_state": intake.formation_state,
+        "ein": intake.ein,
+        "principal_address": intake.principal_address,
+        "officer_name": intake.officer_name,
+        "officer_title": intake.officer_title,
+        "officer_email": intake.officer_email,
+        "primary_contact_name": intake.primary_contact_name,
+        "primary_contact_email": intake.primary_contact_email,
+        "primary_contact_phone": intake.primary_contact_phone,
+        "target_states": intake.target_states,
+        "intends_international": intake.intends_international,
+        "estimated_monthly_revenue": (
+            float(intake.estimated_monthly_revenue)
+            if intake.estimated_monthly_revenue is not None
+            else None
+        ),
+        "ocn": intake.ocn,
+        "extra": intake.extra,
+    }
+    return (
+        "Captured client intake (use these values directly in your "
+        "filing draft — do NOT write '[from intake]' placeholders for "
+        "fields present here):\n" + json.dumps(payload, indent=2, default=str)
+    )
+
+
+read_client_intake = Tool(
+    name="read_client_intake",
+    description=(
+        "Read the client's actual intake field values (legal_name, "
+        "entity_type, formation_state, ein, principal_address, "
+        "officer_name/title/email, primary_contact_*, target_states, "
+        "intends_international, estimated_monthly_revenue, ocn). Use "
+        "this to fill real values into a draft instead of writing "
+        "'[from intake]' placeholders. Read-only; safe for any agent."
+    ),
+    input_schema={"type": "object", "properties": {}},
+    tier=TIER_AUTO,
+    db_runner=_read_client_intake,
+)
+
+
 async def _assign_task(args: dict, ctx: ToolContext) -> str:
     agent = str(args.get("agent", "")).strip().lower()
     objective = str(args.get("objective", "")).strip()
@@ -853,6 +916,7 @@ ALL_TOOLS: dict[str, Tool] = {
         # Project-management scope
         get_voip_launch_playbook,
         check_intake_status,
+        read_client_intake,
         assign_task,
         # Intake / client communication
         draft_client_email,
