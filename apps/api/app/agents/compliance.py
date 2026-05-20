@@ -4,6 +4,7 @@ from app.agents.tools import (
     lookup_fcc_requirement,
     queue_filing_submission,
     request_portal_action,
+    update_application_stage,
 )
 
 COMPLIANCE_AGENT = AgentSpec(
@@ -33,5 +34,6 @@ COMPLIANCE_AGENT = AgentSpec(
         check_client_credentials,
         queue_filing_submission,
         request_portal_action,
+        update_application_stage,
     ],
 )

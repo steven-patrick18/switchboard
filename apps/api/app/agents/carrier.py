@@ -3,6 +3,7 @@ from app.agents.tools import (
     check_client_credentials,
     lookup_carrier_specs,
     request_portal_action,
+    update_application_stage,
 )
 
 CARRIER_AGENT = AgentSpec(
@@ -31,5 +32,6 @@ CARRIER_AGENT = AgentSpec(
         lookup_carrier_specs,
         check_client_credentials,
         request_portal_action,
+        update_application_stage,
     ],
 )

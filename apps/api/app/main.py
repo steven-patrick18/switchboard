@@ -8,6 +8,7 @@ from app import platform_config
 from app.api.deps import get_current_user
 from app.api.routes import (
     agents,
+    applications,
     approvals,
     audit,
     auth,
@@ -48,6 +49,7 @@ app.include_router(credentials.router)
 app.include_router(portal_actions.router)
 app.include_router(client_links.router)
 app.include_router(client_portal.router)
+app.include_router(applications.router)
 
 
 @app.get("/health")

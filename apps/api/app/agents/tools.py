@@ -153,18 +153,31 @@ queue_filing_submission = Tool(
 # --- Project Manager Agent tools (T0) ---
 
 _VOIP_LAUNCH_PLAYBOOK = (
-    "Codified US VoIP launch (v1):\n"
+    "Codified US VoIP launch (v2):\n"
     "1. Entity & identity — confirm legal entity, EIN, officers, principal "
-    "address (from client intake).\n"
-    "2. FCC layer — Form 499-A/Q filer registration, RMD entry, "
-    "STIR/SHAKEN token via STI-PA, Section 214 if international.\n"
-    "3. State layer — CPCN/registration in each target state.\n"
-    "4. Carrier onboarding — wholesale applications, credit/KYC, MSAs, "
-    "deposits with 1-3 carriers.\n"
-    "5. Go-live — number provisioning, test calls, monitoring.\n"
-    "6. Ongoing — 499-Q quarterly, CPNI, USF, annual filings.\n"
-    "Owners: Compliance owns 2-3; Document owns MSAs/LOAs/ToS/AUP; the "
-    "operator owns deposits, signatures, and carrier calls."
+    "address (from client intake). Owner: intake agent.\n"
+    "2. OCN — Operating Company Number issued by NECA via Form NECA-OCN-2 "
+    "(https://www.neca.org/business-solutions/companycodeocnadministration). "
+    "Operator applies on behalf of the client with a Letter of Agency. "
+    "Timeline 2-3 weeks. PREREQUISITE for RMD entry and most wholesale "
+    "carriers. Owner: carrier agent.\n"
+    "3. FCC layer — Form 499-A/Q filer registration (USAC E-File), RMD "
+    "entry (only after OCN), STIR/SHAKEN policy filing, Section 214 "
+    "(only if international). Owner: compliance agent.\n"
+    "4. STIR/SHAKEN token — issued by STI-PA / iconectiv. Requires OCN + "
+    "RMD entry + live officer vetting. Timeline 4-8 weeks. Owner: carrier "
+    "agent.\n"
+    "5. State layer — CPCN / SPCOA / Section 99 in each target state. "
+    "Some states require notarization, surety bond, hearings. Owner: "
+    "state_licensing agent.\n"
+    "6. Carrier onboarding — wholesale applications (Twilio, Telnyx, "
+    "Bandwidth, Inteliquent), credit/KYC, MSAs, deposits with 1-3 "
+    "carriers. Owner: carrier agent + document agent for MSAs.\n"
+    "7. Go-live — number provisioning, test calls, monitoring.\n"
+    "8. Ongoing — 499-Q quarterly, CPNI annual, USF, state annual reports. "
+    "Owner: compliance + state_licensing.\n"
+    "PM coordinates step ordering; the operator owns deposits, wet-ink "
+    "signatures, and final carrier calls. Use assign_task to delegate."
 )
 
 
@@ -528,6 +541,20 @@ lookup_state_requirement = Tool(
 # --- Carrier scope (T0 reference lookups) ---------------------------
 
 _CARRIER_REFERENCE = {
+    "ocn": (
+        "OCN (Operating Company Number): issued by NECA, not the FCC. "
+        "Submit Form NECA-OCN-2 at neca.org/business-solutions/"
+        "companycodeocnadministration. Operator applies on behalf of the "
+        "client with a Letter of Agency. Timeline 2-3 weeks. "
+        "PREREQUISITE for: RMD entry, STIR/SHAKEN, and most wholesale "
+        "carriers (Bandwidth especially). Do not start RMD or carrier "
+        "onboarding without OCN in hand."
+    ),
+    "neca": (
+        "NECA (National Exchange Carrier Association) administers OCN "
+        "assignment + ACNA codes. The OCN application is the gate to "
+        "almost every downstream telecom step; queue it first."
+    ),
     "twilio": (
         "Twilio Programmable Voice / SIP Trunking: Service Profile required "
         "for messaging; phone-number subaccount for voice. SIP trunk needs "
@@ -630,6 +657,97 @@ draft_client_email = Tool(
 )
 
 
+# --- Application status reporting (workspace-aware, T1) -------------
+
+
+async def _update_application_stage(args: dict, ctx: ToolContext) -> str:
+    """Agent self-reports progress on a specific filing. The agent picks
+    the application by type (e.g. 'fcc_499', 'state_cpcn:TX', 'ocn')
+    and updates its stage + a short note. Stages are coarse on purpose:
+    not_started, in_progress, awaiting_approval, submitted, under_review,
+    complete, blocked. The current_agent field is set to whichever agent
+    called the tool, so the UI shows 'compliance is working on FCC 499'
+    in real time."""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models import Application  # noqa: PLC0415
+    from app.models.application import ALL_STAGES  # noqa: PLC0415
+
+    if ctx.client_id is None:
+        return "No client context — cannot update application status."
+    app_type = str(args.get("application_type", "")).strip()
+    stage = str(args.get("stage", "")).strip()
+    note = str(args.get("note", "")).strip() or None
+    if not app_type:
+        return "Missing application_type."
+    if stage and stage not in ALL_STAGES:
+        return f"Invalid stage '{stage}'. Valid: {sorted(ALL_STAGES)}."
+
+    row = await ctx.db.scalar(
+        select(Application).where(
+            Application.client_id == ctx.client_id,
+            Application.type == app_type,
+        )
+    )
+    if row is None:
+        return (
+            f"No application of type '{app_type}' exists for this client. "
+            "Operator must add it first (or run sync-from-intake)."
+        )
+    if stage:
+        row.stage = stage
+    if note is not None:
+        row.notes = note
+    row.current_agent = ctx.agent_name
+    return (
+        f"Updated {app_type}: stage={row.stage}, current_agent="
+        f"{row.current_agent}, note={'set' if note else 'unchanged'}."
+    )
+
+
+update_application_stage = Tool(
+    name="update_application_stage",
+    description=(
+        "Self-report your progress on a specific filing/application "
+        "(OCN, FCC 499, RMD, STIR/SHAKEN, state_cpcn:XX, carrier:Y). "
+        "Sets the application's stage and an optional note, and marks "
+        "yourself as the current_agent so the operator's dashboard "
+        "shows who is working on what. Tier-1: auto-runs but audited."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "application_type": {
+                "type": "string",
+                "description": (
+                    "Exact application type code: 'ocn', 'fcc_499', "
+                    "'rmd', 'stir_shaken', 'section_214', "
+                    "'state_cpcn:TX', 'carrier:bandwidth', etc."
+                ),
+            },
+            "stage": {
+                "type": "string",
+                "description": (
+                    "One of: not_started, in_progress, awaiting_approval, "
+                    "submitted, under_review, complete, blocked. Leave "
+                    "unchanged by omitting."
+                ),
+            },
+            "note": {
+                "type": "string",
+                "description": (
+                    "Short note explaining current state — e.g. "
+                    "'Waiting on operator to sign LOA before NECA submit'."
+                ),
+            },
+        },
+        "required": ["application_type"],
+    },
+    tier=TIER_AUTO_NOTIFY,
+    db_runner=_update_application_stage,
+)
+
+
 # --- Tool catalog (single source of truth for the GUI picker) -------
 # Every code-defined Tool that an operator can include in an agent
 # must be registered here. Tiers stay code-defined for safety; the
@@ -658,6 +776,9 @@ ALL_TOOLS: dict[str, Tool] = {
         # Cross-cutting
         check_client_credentials,
         request_portal_action,
+        # Status reporting — every agent should use this to mark
+        # progress on its current application.
+        update_application_stage,
     )
 }
 

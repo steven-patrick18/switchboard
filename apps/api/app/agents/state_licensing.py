@@ -4,6 +4,7 @@ from app.agents.tools import (
     lookup_state_requirement,
     queue_filing_submission,
     request_portal_action,
+    update_application_stage,
 )
 
 STATE_LICENSING_AGENT = AgentSpec(
@@ -31,5 +32,6 @@ STATE_LICENSING_AGENT = AgentSpec(
         check_client_credentials,
         queue_filing_submission,
         request_portal_action,
+        update_application_stage,
     ],
 )

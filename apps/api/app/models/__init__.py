@@ -1,6 +1,7 @@
 from app.models.agent import Agent
 from app.models.agent_lesson import AgentLesson
 from app.models.agent_run import AgentRun
+from app.models.application import Application
 from app.models.approval import Approval
 from app.models.audit_log import AuditLog
 from app.models.client import Client
@@ -17,6 +18,7 @@ __all__ = [
     "Agent",
     "AgentLesson",
     "AgentRun",
+    "Application",
     "Approval",
     "AuditLog",
     "Client",

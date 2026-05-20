@@ -1,5 +1,10 @@
 from app.agents.base import AgentSpec
-from app.agents.tools import check_client_credentials, check_intake_status, draft_client_email
+from app.agents.tools import (
+    check_client_credentials,
+    check_intake_status,
+    draft_client_email,
+    update_application_stage,
+)
 
 INTAKE_AGENT = AgentSpec(
     name="intake",
@@ -26,5 +31,6 @@ INTAKE_AGENT = AgentSpec(
         check_intake_status,
         check_client_credentials,
         draft_client_email,
+        update_application_stage,
     ],
 )

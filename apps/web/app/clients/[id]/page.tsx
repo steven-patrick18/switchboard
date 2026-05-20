@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch, downloadFile, fetchBlob } from "@/lib/api";
 import AppShell from "@/app/AppShell";
 import IntakeForm, { type IntakeFields } from "./IntakeForm";
+import LaunchProgress from "./LaunchProgress";
 
 type RequiredDoc = {
   key: string;
@@ -669,6 +670,9 @@ export default function ClientDetailPage() {
           Submit intake
         </button>
       </section>
+
+      {/* Launch progress — per-filing stage tracker */}
+      <LaunchProgress clientId={id} />
 
       {/* Documents */}
       <section className="mt-8">
