@@ -19,7 +19,50 @@ class ApprovalOut(BaseModel):
     executed_at: datetime | None
     execution_result: str | None
     result_document_id: uuid.UUID | None
+    email_packet: dict | None = None
+    email_sent_at: datetime | None = None
+    email_message_id: str | None = None
     ts: datetime
+
+
+class SendEmailBody(BaseModel):
+    """Optional overrides if the operator wants to tweak the prefilled
+    packet before clicking Send. Any field omitted falls back to the
+    saved Approval.email_packet."""
+
+    to: str | None = Field(default=None, max_length=255)
+    subject: str | None = Field(default=None, max_length=255)
+    body: str | None = Field(default=None, max_length=20000)
+    cc: list[str] | None = Field(default=None, max_length=20)
+
+
+class SendEmailResult(BaseModel):
+    sent: bool
+    message_id: str | None
+    error: str | None
+
+
+class RecordReplyBody(BaseModel):
+    """Paste-the-reply affordance: when NECA / FCC / a carrier replies
+    by email, the operator pastes the full reply text here. The
+    platform spawns a new agent task with the reply as context so the
+    same agent that drafted the original can produce the next step."""
+
+    reply: str = Field(min_length=1, max_length=20000)
+    from_address: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def _strip_nonempty(self) -> "RecordReplyBody":
+        if not self.reply.strip():
+            raise ValueError("reply cannot be blank")
+        return self
+
+
+class RecordReplyResult(BaseModel):
+    new_task_id: uuid.UUID
+    ran: bool
+    new_approval_ids: list[uuid.UUID]
+    agent_reply: str | None
 
 
 class ApproveBody(BaseModel):

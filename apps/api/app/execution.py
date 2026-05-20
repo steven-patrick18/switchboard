@@ -13,7 +13,9 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.email_packets import build_email_packet
 from app.models.approval import Approval
+from app.models.client_intake import ClientIntake
 from app.models.credential import Credential
 from app.models.document import Document
 
@@ -27,6 +29,29 @@ async def _next_version(db: AsyncSession, client_id: uuid.UUID, doc_type: str) -
     return (current or 0) + 1
 
 
+async def _intake_for(
+    db: AsyncSession, client_id: uuid.UUID
+) -> tuple[str | None, str | None]:
+    """Legal name + EIN for the email packet header. Returns (None, None)
+    if no intake row yet — the packet builder substitutes [TBD]."""
+    intake = await db.scalar(
+        select(ClientIntake).where(ClientIntake.client_id == client_id)
+    )
+    if intake is None:
+        return None, None
+    return intake.legal_name, intake.ein
+
+
+async def _platform_from_address(db: AsyncSession) -> str:
+    """Use the operator's configured SMTP-from as the 'From' line. Falls
+    back to a Switchboard-branded placeholder so the packet still
+    renders if SMTP isn't set up yet."""
+    from app import platform_config  # noqa: PLC0415
+
+    sender = await platform_config.smtp_from(db)
+    return sender or "[operator email — set SMTP_FROM in Settings]"
+
+
 async def _execute_filing(
     approval: Approval, client_id: uuid.UUID, db: AsyncSession
 ) -> str:
@@ -37,10 +62,23 @@ async def _execute_filing(
     db.add(doc)
     await db.flush()
     approval.result_document_id = doc.id
+    # Build the prefilled email packet so the operator can one-click
+    # send (or copy-paste) the filing to NECA / USAC / state PUC.
+    legal_name, ein = await _intake_for(db, client_id)
+    from_address = await _platform_from_address(db)
+    approval.email_packet = build_email_packet(
+        form=form,
+        payload=payload,
+        legal_name=legal_name,
+        ein=ein,
+        from_address=from_address,
+        summary=str(payload.get("summary") or ""),
+    ).to_json()
     return (
         f"Recorded {form} (v{version}) in the Document Hub. The external "
         f"submission to FCC is performed by the integration layer (not yet "
-        f"wired) — this is the tracked internal artifact."
+        f"wired) — this is the tracked internal artifact. A ready-to-send "
+        f"email packet is attached to this approval."
     )
 
 
@@ -55,10 +93,28 @@ async def _execute_signature(
     db.add(doc)
     await db.flush()
     approval.result_document_id = doc.id
+    # Even before Documenso integration is wired, give the operator a
+    # ready-to-send email so they can dispatch the doc out-of-band.
+    legal_name, ein = await _intake_for(db, client_id)
+    from_address = await _platform_from_address(db)
+    body = (
+        f"Please find attached: {doc_type} for {legal_name or '[client]'} "
+        f"({ein or 'EIN TBD'}).\n\nReply with your signature or use the "
+        f"e-sign link once wired.\n\nThank you,\n{from_address}"
+    )
+    approval.email_packet = {
+        "to": recipient,
+        "from_address": from_address,
+        "subject": f"Please sign: {doc_type} — {legal_name or 'client'}",
+        "body": body,
+        "cc": None,
+        "attachments_note": f"Attach: {doc_type} v{version} from Document Hub.",
+    }
     return (
         f"Recorded a signature request for {doc_type} (v{version}) to "
         f"{recipient} in the Document Hub. The Documenso send is performed "
-        f"by the integration layer (Week 4-5) — not yet wired."
+        f"by the integration layer (Week 4-5) — not yet wired. A ready-"
+        f"to-send email packet is attached to this approval."
     )
 
 

@@ -49,10 +49,21 @@ async def _load_config(db: AsyncSession) -> SmtpConfig:
     )
 
 
-def _send_sync(cfg: SmtpConfig, to: str, subject: str, body: str) -> None:
+def _send_sync(
+    cfg: SmtpConfig,
+    to: str,
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+) -> str:
+    """Synchronous SMTP send. Returns the Message-ID so the caller can
+    record it on the Approval (for later inbound-reply matching when
+    IMAP/webhook integration is wired)."""
     msg = EmailMessage()
     msg["From"] = cfg.sender
     msg["To"] = to
+    if cc:
+        msg["Cc"] = ", ".join(cc)
     msg["Subject"] = subject
     msg.set_content(body)
     with smtplib.SMTP(cfg.host, cfg.port or 587) as s:
@@ -61,6 +72,29 @@ def _send_sync(cfg: SmtpConfig, to: str, subject: str, body: str) -> None:
         if cfg.user and cfg.password:
             s.login(cfg.user, cfg.password)
         s.send_message(msg)
+    return msg.get("Message-ID") or ""
+
+
+async def send_email_now(
+    db: AsyncSession,
+    *,
+    to: str,
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+) -> tuple[bool, str | None, str | None]:
+    """Synchronous send that returns (ok, message_id, error_text). Used
+    by the operator's manual 'Send via email' click — they want to know
+    immediately whether it went out, so failures are surfaced (unlike
+    send_email which swallows them by design)."""
+    cfg = await _load_config(db)
+    if not cfg.enabled:
+        return False, None, "SMTP not configured (set host + from in Settings)."
+    try:
+        mid = await asyncio.to_thread(_send_sync, cfg, to, subject, body, cc)
+        return True, mid or None, None
+    except Exception as exc:  # noqa: BLE001 — boundary: external SMTP
+        return False, None, f"{exc.__class__.__name__}: {exc}"
 
 
 async def send_email(

@@ -6,6 +6,82 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.14 — Email packets on every filing + reply-paste loop · 2026-05-20
+
+### Added — every approved filing comes with a ready-to-send email
+Approved filings used to land in the Document Hub but the operator
+still had to figure out who to email, what subject, and write the
+body. Now each filing's executor builds a structured
+**email packet** (To / From / Subject / Body / Attachments note)
+and attaches it to the Approval row.
+
+Per-form catalog in `app/email_packets.py`:
+- **NECA-OCN-2** → `ocn-admin@neca.org`, subject =
+  "NECA-OCN-2 application: {legal_name} (EIN {ein})", body
+  references the LOA + the FRN
+- **FCC 499-A/Q** → `filer-help@usac.org`, includes the FRN
+- **RMD** → `rmd-help@fcc.gov`, references OCN
+- **state_cpcn:XX** → placeholder recipient (per-state PUC inbox
+  is operator-supplied; the endpoint refuses to send a placeholder)
+- **Generic fallback** for novel filings
+
+### Migration 0016
+Adds `approvals.email_packet` (JSON), `approvals.email_sent_at`
+(timestamp), `approvals.email_message_id` (string) — so we can
+later match inbound replies back to the originating approval when
+real IMAP/webhook integration ships.
+
+### Endpoint — POST /approvals/{id}/send-email
+- One-click send via the existing SMTP stack
+  (`app/notifications.send_email_now`)
+- Operator can override To/Subject/Body in the request body if
+  they tweaked the draft
+- Refuses to send if To still looks like a `[placeholder]`
+- Returns `{sent, message_id, error}` — UI falls back to copy-paste
+  if SMTP is not configured
+- Audited as `approval.emailed`; sent_at + message_id stored
+
+### Endpoint — POST /approvals/{id}/record-reply (manual reply bridge)
+Until real IMAP/webhook lands, operators paste inbound replies
+here. The endpoint:
+1. Records the audit row `approval.reply_recorded`
+2. Creates a new task on the same project, same agent, with
+   `instruction = original + "INBOUND REPLY received from X: …" + "decide the next step"`
+3. Auto-runs the agent if `ANTHROPIC_API_KEY` is configured;
+   otherwise leaves the task queued
+
+### Approval card UI
+Each approval now shows an **Email packet** section (visible once
+the executor has populated it):
+- Editable To / Subject / Body fields, copy buttons next to each
+- "Send via email ▸" button (with sent timestamp once it goes)
+- **Reply received?** block with paste-the-reply textarea and
+  "Process reply with agent ▸" button
+
+### Tests (`tests/test_email_packets.py`, 8 new)
+- Per-form packet builders: NECA, FCC 499, state CPCN placeholder,
+  generic fallback
+- `/send-email` returns 200 with `sent=false` + clear error when
+  SMTP is not configured (UI falls back gracefully)
+- `/send-email` 400 when recipient is still a `[placeholder]`
+- `/record-reply` creates a queued task with the reply text + from
+  address baked into the instruction
+- `/record-reply` 422 when reply body is blank
+
+145 tests passing.
+
+### Not in this round — real two-way IMAP/webhook (next phase)
+- Inbox polling (IMAP) OR inbound webhook (SendGrid / SES /
+  Postmark)
+- Message-ID threading so replies auto-claim against the right
+  approval without paste
+- Bounce handling, attachment ingest
+
+These are real lifts that deserve their own design pass. The
+v1.3.14 manual loop (operator pastes the reply body) is functional
+and audited end-to-end; the inbound automation is purely an
+ergonomics improvement on top.
+
 ## v1.3.13 — Live Activity stops lying about phantom approvals · 2026-05-20
 
 ### Fixed — `/activity` now agrees with `/approvals`

@@ -22,9 +22,13 @@ from app.schemas.approvals import (
     ApproveBody,
     BatchBody,
     BatchResult,
+    RecordReplyBody,
+    RecordReplyResult,
     RejectBody,
     SendBackBody,
     SendBackResult,
+    SendEmailBody,
+    SendEmailResult,
 )
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
@@ -53,6 +57,9 @@ def _out(approval: Approval, client: Client) -> ApprovalOut:
         executed_at=approval.executed_at,
         execution_result=approval.execution_result,
         result_document_id=approval.result_document_id,
+        email_packet=approval.email_packet,
+        email_sent_at=approval.email_sent_at,
+        email_message_id=approval.email_message_id,
         ts=approval.ts,
     )
 
@@ -393,6 +400,179 @@ async def send_back(
     await db.commit()
     return SendBackResult(
         rejected_approval_id=approval_id,
+        new_task_id=new_task_id,
+        ran=ran,
+        new_approval_ids=new_approval_ids,
+        agent_reply=agent_reply,
+    )
+
+
+@router.post("/{approval_id}/send-email", response_model=SendEmailResult)
+async def send_email_for_approval(
+    approval_id: uuid.UUID,
+    body: SendEmailBody,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SendEmailResult:
+    """Send the approval's prefilled email packet via the platform's
+    configured SMTP. The operator can override To/Subject/Body in the
+    request body if they tweaked the draft before clicking Send.
+
+    Records sent_at + Message-ID on the approval so we can later match
+    inbound replies back to the same approval. Audited as
+    `approval.emailed`. Fails gracefully with a 400 if SMTP isn't
+    configured — the UI can then fall back to its copy-paste path."""
+    from app.notifications import send_email_now  # noqa: PLC0415
+
+    approval, client = await _load_owned(approval_id, user, db)
+    packet = approval.email_packet or {}
+    to = (body.to or packet.get("to") or "").strip()
+    subject = (body.subject or packet.get("subject") or "").strip()
+    body_text = body.body or packet.get("body") or ""
+    cc = body.cc or packet.get("cc") or None
+    if not (to and subject and body_text):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email packet is incomplete (to / subject / body required).",
+        )
+    if to.startswith("["):
+        # The packet builder left an unfilled placeholder (e.g. state
+        # PUC inbox not in the catalog). Force the operator to override.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Recipient is still a placeholder ({to}); override 'to' in the request.",
+        )
+
+    sent, message_id, error = await send_email_now(
+        db, to=to, subject=subject, body=body_text, cc=cc
+    )
+    if sent:
+        approval.email_sent_at = datetime.now(UTC)
+        approval.email_message_id = message_id
+        await record_audit(
+            db,
+            actor=user.email,
+            action="approval.emailed",
+            subject=f"approval:{approval.id}",
+            client_id=client.id,
+            after={
+                "to": to,
+                "subject": subject,
+                "message_id": message_id,
+            },
+        )
+        await db.commit()
+    return SendEmailResult(sent=sent, message_id=message_id, error=error)
+
+
+@router.post("/{approval_id}/record-reply", response_model=RecordReplyResult)
+async def record_reply(
+    approval_id: uuid.UUID,
+    body: RecordReplyBody,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> RecordReplyResult:
+    """A reply came in over email (or some other channel) — paste it
+    here. The platform creates a fresh agent task with the original
+    instruction + the reply as context so the same agent that drafted
+    the original carries the thread forward. Auto-runs if Anthropic is
+    configured; otherwise the task lands queued.
+
+    Until real IMAP/webhook integration ships, this is the manual
+    bridge that gives the operator a 'reply received' affordance per
+    approval. Audited as `approval.reply_recorded`."""
+    approval, client = await _load_owned(approval_id, user, db)
+    old_task = await db.get(Task, approval.task_id)
+    if old_task is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Original task missing; cannot record reply.",
+        )
+    agent_name = old_task.agent
+    original = ""
+    if isinstance(old_task.input, dict):
+        original = str(
+            old_task.input.get("instruction") or old_task.input.get("objective") or ""
+        ).strip()
+
+    reply_from = (body.from_address or "the recipient").strip()
+    new_instruction = (
+        (original or f"Continue {approval.action_type} for this client.")
+        + "\n\nINBOUND REPLY received "
+        + (f"from {reply_from} " if reply_from else "")
+        + f"on approval {approval.id}:\n\n---\n"
+        + body.reply.strip()
+        + "\n---\n\nDecide the next step. Draft any follow-up needed; "
+        + "queue further tier-3 actions as required."
+    )
+
+    new_task = Task(
+        project_id=old_task.project_id,
+        agent=agent_name or "pm",
+        status="queued",
+        input={
+            "instruction": new_instruction,
+            "replied_from_approval": str(approval.id),
+        },
+    )
+    db.add(new_task)
+    await db.flush()
+    new_task_id = new_task.id
+
+    await record_audit(
+        db,
+        actor=user.email,
+        action="approval.reply_recorded",
+        subject=f"approval:{approval.id}",
+        client_id=client.id,
+        after={
+            "from": reply_from,
+            "reply_chars": len(body.reply),
+            "new_task_id": str(new_task_id),
+        },
+    )
+
+    ran = False
+    new_approval_ids: list[uuid.UUID] = []
+    agent_reply: str | None = None
+    try:
+        from anthropic import AsyncAnthropic  # noqa: PLC0415
+
+        from app import platform_config  # noqa: PLC0415
+        from app.agents.base import run_agent  # noqa: PLC0415
+        from app.api.routes.agents import _resolve_runnable  # noqa: PLC0415
+
+        key = await platform_config.anthropic_api_key(db)
+        if key and agent_name:
+            spec = await _resolve_runnable(agent_name, user, db)
+            if spec is not None:
+                anthro = AsyncAnthropic(api_key=key)
+                new_task.status = "running"
+                await db.flush()
+                result = await run_agent(
+                    spec,
+                    client=anthro,
+                    db=db,
+                    task_id=new_task_id,
+                    instruction=new_instruction,
+                    client_id=client.id,
+                    project_id=old_task.project_id,
+                    owner_id=user.id,
+                    autonomy_level=client.autonomy_level,
+                )
+                new_task.status = (
+                    "awaiting_approval" if result.approval_ids else "completed"
+                )
+                new_task.output = {"text": result.text}
+                new_approval_ids = list(result.approval_ids)
+                agent_reply = result.text
+                ran = True
+    except Exception as exc:  # noqa: BLE001 — LLM boundary
+        new_task.status = "queued"
+        new_task.output = {"reply_run_error": str(exc)[:500]}
+
+    await db.commit()
+    return RecordReplyResult(
         new_task_id=new_task_id,
         ran=ran,
         new_approval_ids=new_approval_ids,
