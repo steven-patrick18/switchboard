@@ -33,12 +33,24 @@ export default function NextSteps({
 }: {
   clientId: string;
   // Parent owns the agent-run action so it can reload tasks/audit
-  // alongside the readiness snapshot.
-  onAgentRun: (agent: string, instruction: string) => Promise<void>;
+  // alongside the readiness snapshot. Returns the agent's reply so
+  // we can render it inline (text + approval IDs).
+  onAgentRun: (
+    agent: string,
+    instruction: string,
+  ) => Promise<{ text: string; approval_ids: string[] } | undefined>;
 }) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Last agent run's result, displayed inline so the operator doesn't
+  // have to scroll back to the page-level message banner to see it.
+  const [lastRun, setLastRun] = useState<{
+    label: string;
+    agent: string;
+    text: string;
+    approval_ids: string[];
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -57,8 +69,17 @@ export default function NextSteps({
   async function start(item: ReadinessItem) {
     setBusy(item.application_type);
     setErr(null);
+    setLastRun(null);
     try {
-      await onAgentRun(item.owner_agent, item.instruction);
+      const result = await onAgentRun(item.owner_agent, item.instruction);
+      if (result) {
+        setLastRun({
+          label: item.label,
+          agent: item.owner_agent,
+          text: result.text,
+          approval_ids: result.approval_ids,
+        });
+      }
       await load();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Start failed");
@@ -89,9 +110,56 @@ export default function NextSteps({
       </div>
 
       {err && (
-        <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-800">
-          {err}
-        </p>
+        <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <p className="font-semibold">Start failed.</p>
+          <p className="mt-1 text-xs">{err}</p>
+          <p className="mt-2 text-xs">
+            Common causes: Anthropic key not set (Settings → Platform
+            readiness), the agent timed out, or the API hit an error —
+            check{" "}
+            <code>docker compose ... logs api</code> on the VPS for the
+            full trace.
+          </p>
+        </div>
+      )}
+
+      {lastRun && (
+        <div className="mt-2 rounded-md border border-green-200 bg-green-50 p-3 text-sm">
+          <p className="font-semibold text-green-900">
+            {lastRun.agent} ran on {lastRun.label}.
+          </p>
+          <p className="mt-1 text-xs text-slate-700">
+            {lastRun.approval_ids.length === 0
+              ? "No approvals queued — the agent worked entirely with read-only / T1 tools (no external action needed yet)."
+              : `${lastRun.approval_ids.length} approval(s) queued — review them in the Approval queue.`}
+          </p>
+          {lastRun.text && (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer text-slate-600 underline">
+                Show agent reply
+              </summary>
+              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-white p-3 text-xs text-slate-800">
+                {lastRun.text}
+              </pre>
+            </details>
+          )}
+          {lastRun.approval_ids.length > 0 && (
+            <p className="mt-2 text-xs">
+              <a
+                href="/approvals"
+                className="font-medium text-slate-700 underline"
+              >
+                Go to Approval queue →
+              </a>
+            </p>
+          )}
+          <button
+            onClick={() => setLastRun(null)}
+            className="mt-2 text-xs text-slate-500 underline"
+          >
+            dismiss
+          </button>
+        </div>
       )}
 
       {snap && !snap.intake_complete && (

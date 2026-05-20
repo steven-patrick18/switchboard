@@ -6,6 +6,36 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.4 — Inline result panel under Next Steps · 2026-05-20
+
+### Changed — Agent results now show INSIDE the Next Steps section
+Previous behaviour: clicking Start on a Ready card kicked off the
+agent run, but the success message / error landed in the page-level
+message banner at the top of the client page — which the operator
+couldn't see if they were scrolled down on the Next Steps section.
+Felt like "nothing happened" even when the run had completed.
+
+Now: NextSteps owns its own success / error panel that renders
+inline immediately above the Ready list. Operators see:
+- **Success**: green panel with "{agent} ran on {label}. N
+  approval(s) queued — review them in the Approval queue." plus a
+  collapsible "Show agent reply" with the full text, plus a direct
+  "Go to Approval queue →" link when approvals were queued.
+- **Failure**: red panel with the actual error message + a hint
+  pointing the operator to Settings → Platform readiness (most
+  common cause: Anthropic key not set) and `docker compose ...
+  logs api` for the full trace.
+- **Dismiss** link clears the result so the next Start gets a
+  fresh slate.
+
+Wired:
+- runAgentWith(agent, instruction) now RETURNS the
+  { text, approval_ids } shape (was returning void). NextSteps
+  captures it and renders inline.
+- Error from a failed Start still bubbles up to the page-level
+  banner too, but the inline panel is what the operator actually
+  sees first.
+
 ## v1.3.3 — Credential URL + edit-in-place · 2026-05-20
 
 ### Added — URL field on every credential

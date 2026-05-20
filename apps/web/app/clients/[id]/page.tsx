@@ -531,7 +531,10 @@ export default function ClientDetailPage() {
     );
   }
 
-  async function runAgentWith(agentName: string, instr: string) {
+  async function runAgentWith(
+    agentName: string,
+    instr: string,
+  ): Promise<{ text: string; approval_ids: string[] } | undefined> {
     setBusy(true);
     setMsg(null);
     try {
@@ -547,6 +550,10 @@ export default function ClientDetailPage() {
           `Response: ${r.text.slice(0, 240)}`,
       );
       await load();
+      // Return the result so NextSteps can render it inline — the
+      // operator clicking Start in Next Steps shouldn't have to
+      // scroll back to the top banner to see what happened.
+      return r;
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "Run failed");
       throw err;
