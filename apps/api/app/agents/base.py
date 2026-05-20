@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_learning import fetch_recent_lessons, format_lessons_block
 from app.agents.tools import AUTO_TIERS, GATED_TIERS, Tool, ToolContext
 from app.audit import record_audit
 from app.config import settings
@@ -65,6 +66,7 @@ async def run_agent(
     instruction: str,
     client_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
+    owner_id: uuid.UUID | None = None,
 ) -> RunResult:
     """Manual agentic loop. Every T2/T3 tool call is intercepted and lands
     in the approval queue instead of executing — the queue is the product."""
@@ -78,13 +80,24 @@ async def run_agent(
         agent_name=spec.name,
     )
     # Frozen system prompt → cache the prefix (tools + system).
-    system = [
+    # Past corrections are prepended UNCACHED so the agent's most recent
+    # lessons re-render each run; the operator's prompt itself stays
+    # cacheable. Net result: free supervised learning across runs.
+    system: list[dict] = []
+    if owner_id is not None:
+        lessons = await fetch_recent_lessons(
+            db, owner_id=owner_id, agent_name=spec.name
+        )
+        block = format_lessons_block(lessons)
+        if block:
+            system.append({"type": "text", "text": block})
+    system.append(
         {
             "type": "text",
             "text": spec.system_prompt,
             "cache_control": {"type": "ephemeral"},
         }
-    ]
+    )
     anthropic_tools = [t.to_anthropic() for t in spec.tools]
     messages: list[dict] = [{"role": "user", "content": instruction}]
 

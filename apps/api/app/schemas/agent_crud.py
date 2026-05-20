@@ -43,5 +43,22 @@ class AgentOut(BaseModel):
     effort: str | None
     enabled: bool
     is_builtin: bool
+    lesson_count: int = 0  # How many corrections the operator has taught
     created_at: datetime | None
     updated_at: datetime | None
+
+
+class LessonOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    agent_name: str
+    source: str  # rejection | edit | manual
+    action_type: str | None
+    lesson: str
+    source_approval_id: uuid.UUID | None
+    created_at: datetime
+
+
+class LessonCreate(BaseModel):
+    lesson: str = Field(min_length=10, max_length=4000)

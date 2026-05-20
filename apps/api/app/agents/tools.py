@@ -270,7 +270,7 @@ send_document_for_signature = Tool(
 
 # --- Project Manager orchestration tools (workspace-aware) ---
 
-_ASSIGNABLE = {"compliance", "document"}
+_ASSIGNABLE = {"compliance", "document", "intake", "state_licensing", "carrier"}
 
 
 async def _check_intake_status(_args: dict, ctx: ToolContext) -> str:
@@ -347,16 +347,21 @@ assign_task = Tool(
     name="assign_task",
     description=(
         "Delegate a launch step by creating a queued task for another "
-        "agent (compliance or document). Tier-1: internal orchestration "
-        "only — it queues work, it does NOT execute it or take any "
-        "external/regulated action."
+        "agent. Tier-1: internal orchestration only — it queues work, "
+        "it does NOT execute it or take any external/regulated action. "
+        "Pick the most specific agent for the job (intake for client "
+        "data, compliance for FCC, state_licensing for state PUC, "
+        "carrier for wholesale interconnection, document for drafts)."
     ),
     input_schema={
         "type": "object",
         "properties": {
             "agent": {
                 "type": "string",
-                "description": "Target agent: 'compliance' or 'document'.",
+                "description": (
+                    "Target agent name: one of 'intake', 'compliance', "
+                    "'state_licensing', 'carrier', 'document'."
+                ),
             },
             "objective": {
                 "type": "string",
@@ -458,6 +463,173 @@ request_portal_action = Tool(
 )
 
 
+# --- State Licensing scope (T0 reference lookups) -------------------
+
+_STATE_REFERENCE = {
+    "tx": (
+        "Texas: PUC of Texas — Service Provider Certificate of Operating "
+        "Authority (SPCOA). Online filing via Interchange. Officer "
+        "certification + bond may apply for certain CLEC classes."
+    ),
+    "ca": (
+        "California: CPUC — Certificate of Public Convenience and Necessity "
+        "(CPCN). Application + financial showing + officer character "
+        "qualifications. Public-comment/hearing common; multi-month timeline."
+    ),
+    "ny": (
+        "New York: NY PSC — Section 99 certificate for resale; full CPCN "
+        "for facilities-based. Background check on principals; tariff filing."
+    ),
+    "fl": (
+        "Florida: FPSC — Certificate of registration for IXC/local; minimal "
+        "tariff but annual regulatory assessment fees apply."
+    ),
+    "il": (
+        "Illinois: ICC — Certificate of Service Authority for non-incumbent "
+        "telecoms. Application + bond; relatively streamlined process."
+    ),
+}
+
+
+def _lookup_state_requirement(args: dict) -> str:
+    state = str(args.get("state", "")).strip().lower()
+    text = _STATE_REFERENCE.get(state)
+    if text is not None:
+        return text
+    return (
+        f"No specific reference cached for state '{state}'. General rule: "
+        "every state PUC has its own process; confirm with the live PUC site "
+        "(filings page) before drafting the CPCN application. Notarization "
+        "and a surety bond are common requirements."
+    )
+
+
+lookup_state_requirement = Tool(
+    name="lookup_state_requirement",
+    description=(
+        "Look up cached state-level CPCN / PUC licensing requirements by "
+        "2-letter state code (TX, CA, NY, FL, IL, ...). Read-only."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "state": {
+                "type": "string",
+                "description": "2-letter US state code (uppercase or lowercase).",
+            }
+        },
+        "required": ["state"],
+    },
+    tier=TIER_AUTO,
+    runner=_lookup_state_requirement,
+)
+
+
+# --- Carrier scope (T0 reference lookups) ---------------------------
+
+_CARRIER_REFERENCE = {
+    "twilio": (
+        "Twilio Programmable Voice / SIP Trunking: Service Profile required "
+        "for messaging; phone-number subaccount for voice. SIP trunk needs "
+        "ACL + credentials; supports SHAKEN signing for owned numbers."
+    ),
+    "telnyx": (
+        "Telnyx Mission Control: BYOC trunking with full PASSporT signing. "
+        "Per-second billing; requires regulatory bundle (entity docs + "
+        "officer ID) for E911 and STIR/SHAKEN certificate issuance."
+    ),
+    "bandwidth": (
+        "Bandwidth Dashboard: tier-1 carrier with E911, messaging, voice. "
+        "OCN-based interconnection (need OCN issued by NECA first). LOA "
+        "required for porting; financial review before live."
+    ),
+    "inteliquent": (
+        "Inteliquent / Sinch Voice: wholesale interconnection. NOF (notice "
+        "of facilities) for direct interconnect. STI-PA-issued cert needed "
+        "for outbound SHAKEN signing across their network."
+    ),
+    "stir/shaken": (
+        "STIR/SHAKEN: token issuance requires (a) FCC-registered OCN, (b) "
+        "completed Robocall Mitigation Database entry, (c) STI-PA officer "
+        "vetting (iconectiv) — typically 4-8 weeks end to end."
+    ),
+}
+
+
+def _lookup_carrier_specs(args: dict) -> str:
+    carrier = str(args.get("carrier", "")).strip().lower()
+    for key, text in _CARRIER_REFERENCE.items():
+        if key in carrier:
+            return text
+    return (
+        f"No specific spec cached for carrier '{carrier}'. General rule: "
+        "wholesale carriers need OCN + RMD + officer vetting before they "
+        "will provision live numbers. Ask the carrier's regulatory team "
+        "for their current onboarding bundle."
+    )
+
+
+lookup_carrier_specs = Tool(
+    name="lookup_carrier_specs",
+    description=(
+        "Look up cached interconnection / regulatory specs for a wholesale "
+        "carrier (Twilio, Telnyx, Bandwidth, Inteliquent) or 'STIR/SHAKEN'. "
+        "Read-only."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "carrier": {
+                "type": "string",
+                "description": "Carrier name, lowercase, e.g. 'twilio'.",
+            }
+        },
+        "required": ["carrier"],
+    },
+    tier=TIER_AUTO,
+    runner=_lookup_carrier_specs,
+)
+
+
+# --- Client communication (T2: requires operator approval) ----------
+
+draft_client_email = Tool(
+    name="draft_client_email",
+    description=(
+        "Draft an email to send to the client (subject + body + recipient "
+        "role). Tier-2: queued for operator approval; the platform does "
+        "NOT send anything externally until a human approves."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "recipient_role": {
+                "type": "string",
+                "description": "Who on the client side, e.g. 'officer', 'primary_contact'.",
+            },
+            "subject": {
+                "type": "string",
+                "description": "Email subject line.",
+            },
+            "body": {
+                "type": "string",
+                "description": "Plain-language email body (no merge tokens).",
+            },
+            "purpose": {
+                "type": "string",
+                "description": (
+                    "Why this email exists, e.g. 'request EIN letter', "
+                    "'request notarized state CPCN signature'."
+                ),
+            },
+        },
+        "required": ["recipient_role", "subject", "body", "purpose"],
+    },
+    tier=TIER_APPROVE,
+    runner=None,
+)
+
+
 # --- Tool catalog (single source of truth for the GUI picker) -------
 # Every code-defined Tool that an operator can include in an agent
 # must be registered here. Tiers stay code-defined for safety; the
@@ -467,13 +639,19 @@ request_portal_action = Tool(
 ALL_TOOLS: dict[str, Tool] = {
     tool.name: tool
     for tool in (
-        # Compliance scope
+        # Compliance scope (FCC)
         lookup_fcc_requirement,
         queue_filing_submission,
+        # State Licensing scope
+        lookup_state_requirement,
+        # Carrier scope
+        lookup_carrier_specs,
         # Project-management scope
         get_voip_launch_playbook,
         check_intake_status,
         assign_task,
+        # Intake / client communication
+        draft_client_email,
         # Document scope
         lookup_document_template,
         send_document_for_signature,

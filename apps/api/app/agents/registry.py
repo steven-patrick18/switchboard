@@ -1,11 +1,29 @@
 from app.agents.base import AgentSpec
+from app.agents.carrier import CARRIER_AGENT
 from app.agents.compliance import COMPLIANCE_AGENT
 from app.agents.document import DOCUMENT_AGENT
+from app.agents.intake import INTAKE_AGENT
 from app.agents.pm import PM_AGENT
+from app.agents.state_licensing import STATE_LICENSING_AGENT
 
-# Phase 1 roster: Project Manager + Compliance + Document.
+# Six-agent roster, distributed by scope so each agent has a clean
+# domain and doesn't step on the others:
+#   pm              — orchestrator (no external action)
+#   intake          — client data + capture-once mandate
+#   compliance      — federal FCC filings
+#   state_licensing — per-state CPCNs / PUC paperwork
+#   carrier         — wholesale interconnection + STIR/SHAKEN
+#   document        — drafts / signing
 AGENTS: dict[str, AgentSpec] = {
-    spec.name: spec for spec in (PM_AGENT, COMPLIANCE_AGENT, DOCUMENT_AGENT)
+    spec.name: spec
+    for spec in (
+        PM_AGENT,
+        INTAKE_AGENT,
+        COMPLIANCE_AGENT,
+        STATE_LICENSING_AGENT,
+        CARRIER_AGENT,
+        DOCUMENT_AGENT,
+    )
 }
 
 

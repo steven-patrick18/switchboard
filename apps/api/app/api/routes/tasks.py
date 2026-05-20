@@ -51,6 +51,7 @@ async def _execute(
     client_id: uuid.UUID,
     anthropic,
     db: AsyncSession,
+    owner_id: uuid.UUID | None = None,
 ) -> AgentRunResponse:
     task.status = "running"
     await db.flush()
@@ -62,6 +63,7 @@ async def _execute(
         instruction=objective,
         client_id=client_id,
         project_id=project.id,
+        owner_id=owner_id,
     )
     task.status = "awaiting_approval" if result.approval_ids else "completed"
     task.output = {"text": result.text}
@@ -131,7 +133,8 @@ async def run_task(
         )
 
     return await _execute(
-        task, project, spec, objective, client_id, anthropic, db
+        task, project, spec, objective, client_id, anthropic, db,
+        owner_id=user.id,
     )
 
 
@@ -189,7 +192,8 @@ async def run_queued(
         try:
             ran.append(
                 await _execute(
-                    task, project, spec, objective, client_id, anthropic, db
+                    task, project, spec, objective, client_id, anthropic, db,
+                    owner_id=user.id,
                 )
             )
         except Exception as e:  # noqa: BLE001 — boundary: external LLM call

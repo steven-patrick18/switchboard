@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent_learning import record_edit_lesson, record_rejection_lesson
 from app.api.deps import get_current_user
 from app.audit import record_audit
 from app.db import get_db
@@ -131,6 +132,14 @@ async def get_approval(
     return _out(approval, client)
 
 
+async def _agent_name_for_approval(approval: Approval, db: AsyncSession) -> str | None:
+    """Look up which agent originally queued this approval, by joining
+    through its Task. Returns None for orphan approvals (shouldn't
+    happen in practice but the learning path stays safe either way)."""
+    task = await db.get(Task, approval.task_id)
+    return task.agent if task is not None else None
+
+
 @router.post("/{approval_id}/approve", response_model=ApprovalOut)
 async def approve(
     approval_id: uuid.UUID,
@@ -141,7 +150,8 @@ async def approve(
     approval, client = await _load_owned(approval_id, user, db)
     _require_pending(approval)
     before_payload = approval.payload
-    if body.payload_override is not None:
+    edited = body.payload_override is not None
+    if edited:
         approval.payload = body.payload_override
         approval.decision = DECISION_EDITED
     else:
@@ -164,6 +174,20 @@ async def approve(
             "note": approval.note,
         },
     )
+    # Operator edited before approving → teach the agent the corrected shape.
+    if edited:
+        agent_name = await _agent_name_for_approval(approval, db)
+        if agent_name:
+            await record_edit_lesson(
+                db,
+                owner_id=user.id,
+                agent_name=agent_name,
+                action_type=approval.action_type,
+                note=body.note,
+                before_payload=before_payload,
+                after_payload=approval.payload,
+                approval_id=approval.id,
+            )
     approval.execution_result = await execute_approval(approval, client.id, db)
     approval.executed_at = datetime.now(UTC)
     await record_audit(
@@ -199,6 +223,17 @@ async def reject(
         client_id=client.id,
         after={"decision": DECISION_REJECTED, "note": body.reason},
     )
+    # Teach the agent: the reason is the lesson.
+    agent_name = await _agent_name_for_approval(approval, db)
+    if agent_name:
+        await record_rejection_lesson(
+            db,
+            owner_id=user.id,
+            agent_name=agent_name,
+            action_type=approval.action_type,
+            reason=body.reason,
+            approval_id=approval.id,
+        )
     await db.commit()
     return _out(approval, client)
 
@@ -246,6 +281,19 @@ async def batch(
                 client_id=row[1].id,
                 after={"result": approval.execution_result},
             )
+        elif body.decision == DECISION_REJECTED:
+            # Same reason captured for every rejected approval in the
+            # batch — each agent that contributed work gets the lesson.
+            agent_name = await _agent_name_for_approval(approval, db)
+            if agent_name and body.note:
+                await record_rejection_lesson(
+                    db,
+                    owner_id=user.id,
+                    agent_name=agent_name,
+                    action_type=approval.action_type,
+                    reason=body.note,
+                    approval_id=approval.id,
+                )
         updated.append(aid)
     await db.commit()
     return BatchResult(updated=updated, skipped=skipped)

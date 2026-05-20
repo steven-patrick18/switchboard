@@ -72,8 +72,15 @@ async def db():
     await engine.dispose()
 
 
-def test_registry_resolves_phase1_roster():
-    assert set(AGENTS) == {"pm", "compliance", "document"}
+def test_registry_resolves_six_agent_roster():
+    assert set(AGENTS) == {
+        "pm",
+        "intake",
+        "compliance",
+        "state_licensing",
+        "carrier",
+        "document",
+    }
     assert get_agent("pm") is PM_AGENT
     assert get_agent("document") is DOCUMENT_AGENT
     assert get_agent("nope") is None

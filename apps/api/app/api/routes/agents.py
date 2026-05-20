@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +14,17 @@ from app.audit import record_audit
 from app.db import get_db
 from app.llm import get_anthropic_client
 from app.models import Agent as AgentRow
-from app.models import Client, Project, Task, User
+from app.models import AgentLesson, Client, Project, Task, User
+from app.models.agent_lesson import SOURCE_MANUAL
 from app.models.project import PROJECT_STATUS_ACTIVE
-from app.schemas.agent_crud import AgentCreate, AgentOut, AgentUpdate, ToolCatalogEntry
+from app.schemas.agent_crud import (
+    AgentCreate,
+    AgentOut,
+    AgentUpdate,
+    LessonCreate,
+    LessonOut,
+    ToolCatalogEntry,
+)
 from app.schemas.agents import AgentRunRequest, AgentRunResponse
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -80,7 +88,9 @@ async def list_all_agents(
     """Built-in code-defined agents + this operator's custom agents.
     An operator's custom agent that re-uses a built-in name takes
     precedence at run time but BOTH are listed here so the UI can show
-    `(override)` on the custom one."""
+    `(override)` on the custom one. Each row carries lesson_count, the
+    number of operator corrections the agent has been taught — the UI
+    surfaces this as a 'learned: N' chip."""
     rows = list(
         (
             await db.scalars(
@@ -90,8 +100,108 @@ async def list_all_agents(
             )
         ).all()
     )
-    builtins = [_builtin_to_out(s) for s in AGENTS.values()]
-    return builtins + [_custom_to_out(r) for r in rows]
+    # One query for all lesson counts per agent_name for this operator.
+    counts_rows = (
+        await db.execute(
+            select(AgentLesson.agent_name, func.count(AgentLesson.id))
+            .where(AgentLesson.owner_id == user.id)
+            .group_by(AgentLesson.agent_name)
+        )
+    ).all()
+    counts: dict[str, int] = {name: int(c) for name, c in counts_rows}
+    builtins = []
+    for s in AGENTS.values():
+        out = _builtin_to_out(s)
+        out.lesson_count = counts.get(s.name, 0)
+        builtins.append(out)
+    custom = []
+    for r in rows:
+        out = _custom_to_out(r)
+        out.lesson_count = counts.get(r.name, 0)
+        custom.append(out)
+    return builtins + custom
+
+
+# ---------- Lessons (the learning system) ---------------------------
+
+
+@router.get("/{agent_name}/lessons", response_model=list[LessonOut])
+async def list_lessons(
+    agent_name: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[AgentLesson]:
+    """All lessons the operator has taught this agent. Newest first."""
+    rows = await db.scalars(
+        select(AgentLesson)
+        .where(
+            AgentLesson.owner_id == user.id,
+            AgentLesson.agent_name == agent_name,
+        )
+        .order_by(AgentLesson.created_at.desc())
+    )
+    return list(rows.all())
+
+
+@router.post(
+    "/{agent_name}/lessons",
+    response_model=LessonOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_manual_lesson(
+    agent_name: str,
+    body: LessonCreate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentLesson:
+    """Operator can hand-write a lesson — e.g. 'always use the legal
+    company name on FCC filings, not the DBA'. Same in-context injection
+    as auto-captured ones."""
+    row = AgentLesson(
+        owner_id=user.id,
+        agent_name=agent_name,
+        source=SOURCE_MANUAL,
+        lesson=body.lesson,
+    )
+    db.add(row)
+    await db.flush()
+    await record_audit(
+        db,
+        actor=user.email,
+        action="agent_lesson.added",
+        subject=f"agent_lesson:{row.id}",
+        after={"agent_name": agent_name},
+    )
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.delete(
+    "/lessons/{lesson_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def delete_lesson(
+    lesson_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Remove a lesson. Useful when the operator's standards change or
+    the captured reason was situational rather than general."""
+    row = await db.get(AgentLesson, lesson_id)
+    if row is None or row.owner_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found"
+        )
+    agent_name = row.agent_name
+    await db.delete(row)
+    await record_audit(
+        db,
+        actor=user.email,
+        action="agent_lesson.deleted",
+        subject=f"agent_lesson:{lesson_id}",
+        after={"agent_name": agent_name},
+    )
+    await db.commit()
 
 
 def _validate_tool_names(tool_names: list[str]) -> None:
@@ -284,6 +394,7 @@ async def run(
         instruction=body.instruction,
         client_id=client_row.id,
         project_id=project.id,
+        owner_id=user.id,
     )
 
     task.status = "awaiting_approval" if result.approval_ids else "completed"
