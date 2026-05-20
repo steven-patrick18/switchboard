@@ -6,6 +6,68 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.19 — Backfill PDFs onto pre-v1.3.18 approvals · 2026-05-20
+
+### Fixed — "no file" Document Hub rows can be repaired in one click
+v1.3.18 generates PDFs for any new approval, but the operator still
+had ~4 legacy NECA-OCN-2 approvals decided BEFORE that — those
+Document Hub rows still showed "no file" and their email_packet had
+no `attachments` array. The only path to fix them was to send-back-
+to-agent and pay for a fresh Anthropic run.
+
+Now there's a cheaper path that doesn't touch the agent loop:
+
+### Refactor — `app/execution.generate_filing_attachments()`
+Pulled the per-form PDF generation out of `_execute_filing` into a
+named helper. Both the executor (first-time decisions) and the new
+regenerate endpoint (backfill) call the same function — so a
+regenerated package is byte-identical to a freshly-approved one.
+
+### New endpoint — `POST /approvals/{id}/regenerate-attachments`
+- Reads the saved payload off the existing decided Approval.
+- Calls the shared PDF helper → creates new Document rows with real
+  bytes (`v(N+1)` each time so prior versions stay in the forensic
+  chain).
+- Merges `attachments` into the existing `email_packet`, preserving
+  any To/Subject/Body the operator already edited.
+- Audited as `approval.attachments_regenerated`.
+- 400 if action_type != `queue_filing_submission` (only filings have
+  mailable PDFs). 400 if payload is empty. 404 cross-operator.
+
+### Approval card UI
+On a filing approval where `email_packet.attachments` is missing or
+empty, a new amber callout appears:
+
+> **No PDFs attached to this filing yet.**
+> This approval was decided before PDF generation existed. Click
+> below to render the NECA-OCN-2 + Letter of Agency PDFs from the
+> saved payload — no Anthropic call needed.
+> [ Regenerate PDFs ▸ ]
+
+Click → backend renders the PDFs → page reloads → the attachment
+list with preview ↗ / download ↓ buttons appears.
+
+### Tests (`tests/test_regenerate_attachments.py`, 5 new)
+- Legacy approval with NULL attachments → regenerate produces a
+  2-PDF (form + LOA) package, preserves the existing To/Subject/Body.
+- Calling regenerate twice yields versions [1, 2] per doc type —
+  history preserved, no overwrites.
+- 400 on a non-filing action_type (e.g. `request_portal_action`).
+- 404 cross-operator (B can't regenerate A's approval).
+- 400 on an approval with no payload.
+
+169 tests passing. `tsc --noEmit` clean.
+
+### How to use
+On the production approval queue:
+1. Switch the Decision filter to **Decided**.
+2. Open one of the old NECA-OCN-2 approvals (they have "no file"
+   in the Document Hub).
+3. Scroll to **Email packet** — you'll see the new amber callout
+   with the **Regenerate PDFs ▸** button.
+4. Click it. The attachment list appears with the real PDFs.
+5. Preview each one to verify. Then click **Send via email ▸**.
+
 ## v1.3.18 — Approved filings ship REAL PDFs (with attachments) · 2026-05-20
 
 ### Fixed — "no file" Documents are gone

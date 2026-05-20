@@ -281,6 +281,26 @@ export default function ApprovalCard({
     }
   }
 
+  async function regenerateAttachments() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await apiFetch<Approval>(
+        `/approvals/${approval.id}/regenerate-attachments`,
+        { method: "POST" },
+      );
+      onChanged();
+    } catch (e) {
+      setErr(
+        e instanceof Error
+          ? e.message
+          : "Could not regenerate PDFs — try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendEmail() {
     setBusy(true);
     setErr(null);
@@ -558,6 +578,29 @@ export default function ApprovalCard({
                   {initialPacket.attachments_note}
                 </p>
               )}
+              {approval.action_type === "queue_filing_submission" &&
+                (!initialPacket.attachments ||
+                  initialPacket.attachments.length === 0) && (
+                  <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-xs">
+                    <p className="font-semibold text-amber-900">
+                      No PDFs attached to this filing yet.
+                    </p>
+                    <p className="mt-0.5 text-amber-800">
+                      This approval was decided before PDF generation
+                      existed (or the regenerator hasn&apos;t run yet).
+                      Click below to render the NECA-OCN-2 + Letter of
+                      Agency PDFs from the saved payload — no Anthropic
+                      call needed.
+                    </p>
+                    <button
+                      onClick={regenerateAttachments}
+                      disabled={busy}
+                      className="mt-2 rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {busy ? "Regenerating…" : "Regenerate PDFs ▸"}
+                    </button>
+                  </div>
+                )}
               {initialPacket.attachments &&
                 initialPacket.attachments.length > 0 && (
                   <div className="mt-2">

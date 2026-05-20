@@ -407,6 +407,61 @@ async def send_back(
     )
 
 
+@router.post("/{approval_id}/regenerate-attachments", response_model=ApprovalOut)
+async def regenerate_attachments(
+    approval_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApprovalOut:
+    """Re-run PDF generation on a decided approval — the backfill path
+    for approvals decided BEFORE v1.3.18 added PDF generation. Those
+    approvals have email_packet but no attachments (or attachments
+    pointing at no-file Document stubs); the operator needs real PDFs
+    to mail to the regulator.
+
+    This re-uses the same `generate_filing_attachments` helper that
+    `_execute_filing` runs on the first approval, so the rebuilt
+    package is byte-identical to what a freshly-approved filing would
+    have produced. Audited as `approval.attachments_regenerated`."""
+    from app.execution import generate_filing_attachments  # noqa: PLC0415
+
+    approval, client = await _load_owned(approval_id, user, db)
+    if approval.action_type != "queue_filing_submission":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Only filings (queue_filing_submission) carry mailable "
+                "PDF attachments. This approval is a "
+                f"{approval.action_type}."
+            ),
+        )
+    if not approval.payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Approval has no payload to render.",
+        )
+
+    attachments = await generate_filing_attachments(approval, client.id, db)
+    # Merge into the existing email_packet (preserve to/subject/body
+    # the operator may have already tweaked).
+    packet = dict(approval.email_packet or {})
+    packet["attachments"] = attachments
+    approval.email_packet = packet
+    await record_audit(
+        db,
+        actor=user.email,
+        action="approval.attachments_regenerated",
+        subject=f"approval:{approval.id}",
+        client_id=client.id,
+        after={
+            "attachments": [a.get("filename") for a in attachments],
+            "count": len(attachments),
+        },
+    )
+    await db.commit()
+    return _out(approval, client)
+
+
 @router.post("/{approval_id}/send-email", response_model=SendEmailResult)
 async def send_email_for_approval(
     approval_id: uuid.UUID,

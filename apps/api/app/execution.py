@@ -115,21 +115,28 @@ def _pdf_filename(form: str, legal_name: str | None, version: int) -> str:
     return f"{safe_form}__{safe_name}__v{version}.pdf"
 
 
-async def _execute_filing(
+async def generate_filing_attachments(
     approval: Approval, client_id: uuid.UUID, db: AsyncSession
-) -> str:
+) -> list[dict]:
+    """Render the PDF(s) for an approved filing from its payload, persist
+    them via the Document Hub, set `approval.result_document_id`, and
+    return the attachments-list payload (one dict per PDF).
+
+    Called from `_execute_filing` (first time through) AND from
+    `/approvals/{id}/regenerate-attachments` (backfill for approvals
+    decided before PDF generation existed). Both paths produce the
+    same structure; the operator's experience downstream is identical."""
     payload = approval.payload or {}
     form = str(payload.get("form") or "filing")
-    legal_name, ein, _ = await _intake_for(db, client_id)
+    legal_name, _ein, _ = await _intake_for(db, client_id)
 
-    # Generate the actual PDF(s) the operator will mail to the agency.
-    # Picks the right builder per form; everything else falls back to
-    # a generic key/value dump so we never end up with a Document Hub
-    # stub with no file behind it.
     attachments: list[dict] = []
     fkey = form.lower()
     if fkey.startswith("neca-ocn"):
         # NECA-OCN-2 is a two-document package: the form + the LOA.
+        # Versioning bumps automatically; regenerate runs land as
+        # `v(N+1)` rather than overwriting the prior bytes — the
+        # forensic chain stays intact.
         ocn_pdf = build_neca_ocn_2_pdf(payload, legal_name)
         ocn_doc = await _persist_pdf(
             db,
@@ -138,8 +145,6 @@ async def _execute_filing(
             filename=_pdf_filename(form, legal_name, 1),
             data=ocn_pdf,
         )
-        # The LOA filename derives from the form name so they group
-        # cleanly in the Document Hub listing.
         loa_pdf = build_letter_of_agency_pdf(payload, legal_name)
         loa_doc = await _persist_pdf(
             db,
@@ -183,6 +188,16 @@ async def _execute_filing(
                 "size_bytes": gen_doc.size_bytes,
             },
         ]
+    return attachments
+
+
+async def _execute_filing(
+    approval: Approval, client_id: uuid.UUID, db: AsyncSession
+) -> str:
+    payload = approval.payload or {}
+    form = str(payload.get("form") or "filing")
+    legal_name, ein, _ = await _intake_for(db, client_id)
+    attachments = await generate_filing_attachments(approval, client_id, db)
 
     # Build the prefilled email packet so the operator can one-click
     # send (or copy-paste) the filing. IMPORTANT: From line is the
