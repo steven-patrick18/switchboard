@@ -1,0 +1,4 @@
+# Next.js looks for public/ to serve unhashed static assets (favicon,
+# robots.txt, etc.). The Dockerfile copies the directory into the
+# production image, so it must exist even when we have no static
+# files yet. This .gitkeep ensures the directory is committed.
