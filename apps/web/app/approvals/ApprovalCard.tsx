@@ -48,6 +48,88 @@ const TIER_STYLE: Record<string, string> = {
   T3: "bg-red-100 text-red-800",
 };
 
+// --- TBD-placeholder scanning ---------------------------------------
+// The carrier (and other filing-drafting) agents fill what they can
+// read and leave '[TBD - operator fills at approval; <hint>]' for the
+// few fields they genuinely cannot. Instead of forcing the operator
+// to dig through JSON to find them, we recursively scan the payload
+// and render a small form: one input per TBD field with the hint
+// inline. On submit, the form patches the payload at the right path
+// and posts an edit-and-approve.
+
+type TbdField = {
+  path: (string | number)[];
+  label: string;
+  hint: string;
+  raw: string;
+};
+
+const TBD_RE = /^\s*\[\s*tbd\b([\s\S]*?)\]\s*$/i;
+
+function extractTbdHint(s: string): string {
+  // "[TBD - operator fills at approval; typical single OCN unless block]"
+  // -> "operator fills at approval; typical single OCN unless block"
+  // Also tolerates em-dash, colon, no-separator.
+  const m = TBD_RE.exec(s);
+  if (!m) return "";
+  return m[1].replace(/^\s*[-–—:]\s*/, "").trim();
+}
+
+function humanizeKey(key: string | number): string {
+  if (typeof key === "number") return `#${key + 1}`;
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .replace(/\bOcn\b/g, "OCN")
+    .replace(/\bEin\b/g, "EIN")
+    .replace(/\bFcc\b/g, "FCC")
+    .replace(/\bFrn\b/g, "FRN")
+    .replace(/\bLoa\b/g, "LOA")
+    .replace(/\bRmd\b/g, "RMD")
+    .replace(/\bCpcn\b/g, "CPCN");
+}
+
+function findTbdFields(
+  obj: unknown,
+  path: (string | number)[] = [],
+): TbdField[] {
+  if (typeof obj === "string" && TBD_RE.test(obj)) {
+    return [
+      {
+        path,
+        label: humanizeKey(path[path.length - 1] ?? "?"),
+        hint: extractTbdHint(obj),
+        raw: obj,
+      },
+    ];
+  }
+  if (Array.isArray(obj)) {
+    return obj.flatMap((v, i) => findTbdFields(v, [...path, i]));
+  }
+  if (obj && typeof obj === "object") {
+    return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) =>
+      findTbdFields(v, [...path, k]),
+    );
+  }
+  return [];
+}
+
+function setNested(obj: unknown, path: (string | number)[], value: unknown): unknown {
+  if (path.length === 0) return value;
+  const [head, ...rest] = path;
+  if (Array.isArray(obj)) {
+    const next = [...obj];
+    const idx = typeof head === "number" ? head : Number(head);
+    next[idx] = setNested(obj[idx], rest, value);
+    return next;
+  }
+  const src = (obj as Record<string, unknown>) ?? {};
+  return {
+    ...src,
+    [String(head)]: setNested(src[String(head)], rest, value),
+  };
+}
+
 export default function ApprovalCard({
   approval,
   catalog,
@@ -69,6 +151,11 @@ export default function ApprovalCard({
             a.action === approval.payload?.action,
         ) ?? null
       : null;
+  const tbdFields = findTbdFields(approval.payload ?? {});
+  const summary =
+    typeof approval.payload?.summary === "string"
+      ? (approval.payload.summary as string)
+      : "";
   const [mode, setMode] = useState<"none" | "edit" | "send_back">("none");
   const [editText, setEditText] = useState(
     JSON.stringify(approval.payload ?? {}, null, 2),
@@ -91,6 +178,10 @@ export default function ApprovalCard({
   } | null>(null);
   const [replyText, setReplyText] = useState("");
   const [replyFrom, setReplyFrom] = useState("");
+  // One input per [TBD ...] placeholder found in the payload, keyed by
+  // dotted path. Lets the operator answer just the missing questions
+  // without scanning JSON.
+  const [tbdValues, setTbdValues] = useState<Record<string, string>>({});
   const [replyResult, setReplyResult] = useState<{
     new_task_id: string;
     ran: boolean;
@@ -143,6 +234,35 @@ export default function ApprovalCard({
       return;
     }
     call(`/approvals/${approval.id}/reject`, { reason: note });
+  }
+
+  function fillTbdValuesIntoPayload(): unknown {
+    let patched: unknown = approval.payload ?? {};
+    for (const f of tbdFields) {
+      const key = f.path.join(".");
+      const v = (tbdValues[key] ?? "").trim();
+      if (v) {
+        patched = setNested(patched, f.path, v);
+      }
+    }
+    return patched;
+  }
+
+  function approveWithFilledFields() {
+    const missing = tbdFields.filter(
+      (f) => !(tbdValues[f.path.join(".")] ?? "").trim(),
+    );
+    if (missing.length > 0) {
+      setErr(
+        "Fill in: " + missing.map((m) => m.label).join(", "),
+      );
+      return;
+    }
+    const patched = fillTbdValuesIntoPayload();
+    call(`/approvals/${approval.id}/approve`, {
+      payload_override: patched,
+      note: note || null,
+    });
   }
 
   async function copyText(s: string) {
@@ -268,9 +388,72 @@ export default function ApprovalCard({
               {portalSpec.description}
             </p>
           )}
-          <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs text-slate-700">
-            {JSON.stringify(approval.payload ?? {}, null, 2)}
-          </pre>
+          {summary && (
+            <p className="mt-2 rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-800">
+              {summary}
+            </p>
+          )}
+
+          {tbdFields.length > 0 && (
+            <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3">
+              <p className="text-sm font-semibold text-amber-900">
+                The agent needs {tbdFields.length} thing
+                {tbdFields.length === 1 ? "" : "s"} from you:
+              </p>
+              <p className="mt-0.5 text-xs text-amber-800">
+                Everything else is already filled in from intake. Just
+                answer these and click Approve.
+              </p>
+              <div className="mt-3 space-y-3">
+                {tbdFields.map((f) => {
+                  const key = f.path.join(".");
+                  return (
+                    <div key={key}>
+                      <label className="text-xs font-medium text-slate-700">
+                        {f.label}
+                      </label>
+                      <input
+                        value={tbdValues[key] ?? ""}
+                        onChange={(e) =>
+                          setTbdValues({
+                            ...tbdValues,
+                            [key]: e.target.value,
+                          })
+                        }
+                        placeholder={f.hint || "Type the value here"}
+                        className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                      />
+                      {f.hint && (
+                        <p className="mt-1 text-xs text-slate-600">
+                          ↳ {f.hint}
+                        </p>
+                      )}
+                      <p className="mt-0.5 font-mono text-[10px] text-slate-400">
+                        {key}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                onClick={approveWithFilledFields}
+                disabled={busy}
+                className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                Approve with these values ▸
+              </button>
+            </div>
+          )}
+
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer text-slate-600 underline">
+              Show full filing data ({tbdFields.length > 0 ? "raw JSON " : ""}
+              {Object.keys(approval.payload ?? {}).length} fields)
+            </summary>
+            <pre className="mt-2 overflow-x-auto rounded bg-slate-50 p-3 text-xs text-slate-700">
+              {JSON.stringify(approval.payload ?? {}, null, 2)}
+            </pre>
+          </details>
 
           {/* Email packet — present once the executor has run, i.e.
               after the operator approves. Lets them send the filing

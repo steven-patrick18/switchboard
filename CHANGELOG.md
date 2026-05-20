@@ -6,6 +6,69 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.16 — Approval card asks for ONLY what the agent doesn't know · 2026-05-20
+
+### Fixed — no more 100-line JSON wall for two missing fields
+Your NECA-OCN-2 approval card was showing the entire filing as raw
+JSON. The agent had already filled in 30+ fields from intake + the
+CORES FRN lookup; the operator only needed to answer two things:
+- `ocn_block_size_requested` (typical: single OCN unless you want a
+  block)
+- `effective_date_requested` (when the LOA takes effect)
+- and the LOA's own `effective_date`
+
+But you had to scroll through the JSON wall to find them. That's the
+opposite of the agent-platform promise.
+
+### How the card looks now
+1. **Plain-English summary** at the top (`payload.summary` from the
+   agent's draft, e.g. "NECA OCN application + LOA for Amano Telecom
+   LLC. Requesting issuance of a new OCN to enable wholesale carrier
+   interconnection. FRN 0037045218.").
+2. **"The agent needs N things from you" form** — one input per
+   `[TBD …]` placeholder the agent left, with:
+   - Humanized label (`ocn_block_size_requested` → "OCN Block Size
+     Requested" — abbreviations preserved: OCN, EIN, FCC, FRN, LOA,
+     RMD, CPCN)
+   - The hint inline (the text inside the `[TBD - hint]` brackets)
+   - The full dotted path in muted mono so the operator can verify
+     where the value will land
+3. **"Approve with these values ▸"** button — patches the payload
+   with your inputs (deep-set at the right path, including nested
+   structures like `letter_of_agency.effective_date`), then submits
+   as edit-and-approve.
+4. Raw JSON moved into a collapsed `<details>` block ("Show full
+   filing data — 30 fields") for when you want it.
+
+### Scanner correctness
+The `findTbdFields(payload)` walker:
+- Recursively descends objects and arrays (the LOA's nested
+  `effective_date` is found correctly).
+- Detects `[TBD]`, `[TBD - …]`, `[TBD – …]` (en-dash), `[TBD — …]`
+  (em-dash), `[TBD: …]`, and `[ tbd ... ]` (case-insensitive,
+  whitespace-tolerant).
+- Strips the separator from the hint text so the operator sees a
+  clean explanation, not `– operator fills at approval`.
+
+Verified end-to-end against the exact payload from your screenshot
+in the live preview — scanner returns the right 3 fields with clean
+hint text:
+- ocn_block_size_requested → "operator fills at approval; typical
+  single OCN unless block requested"
+- effective_date_requested → "operator fills at approval"
+- letter_of_agency.effective_date → "operator fills at approval"
+
+### Non-changes
+- The Email packet section + Reply received block stay where they
+  are (after the TBD form), since you may want to skip the form
+  entirely (e.g. when there's nothing to fill).
+- The Edit & approve / Send back / Reject buttons still work for
+  cases where the operator wants the raw JSON path. The new form
+  is additive — it just shows up automatically when the payload
+  contains any `[TBD …]`.
+
+158 tests passing. `tsc --noEmit` clean.
+
 ## v1.3.15 — Filings send FROM THE CLIENT, not from Switchboard · 2026-05-20
 
 ### Fixed — chain-of-custody on outbound regulator email
