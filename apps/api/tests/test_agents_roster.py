@@ -115,7 +115,12 @@ def test_carrier_agent_has_ocn_queueing_tool():
     prompt = CARRIER_AGENT.system_prompt.lower()
     assert "ocn" in prompt
     assert "neca" in prompt
-    assert "not the fcc" in prompt
+    # Locks in the v1.3.9 hardening: the carrier agent must never
+    # suggest re-routing OCN/CORES work to compliance, and must always
+    # queue the filing rather than stalling for missing fields.
+    assert "bias toward action" in prompt
+    assert "tbd" in prompt
+    assert "never suggest a different agent" in prompt
 
 
 async def test_carrier_ocn_filing_is_queued_not_executed(db: AsyncSession):

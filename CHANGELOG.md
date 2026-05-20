@@ -6,6 +6,43 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.9 — Carrier agent stops stalling on OCN · 2026-05-20
+
+### Fixed — carrier agent now always queues the NECA-OCN-2 draft
+After v1.3.8 flipped Amber Sidney Hunt (Amano Telecom) into
+autonomous mode, hitting **Start ▸** on OCN ran the carrier agent
+to completion with **0 approvals queued**. The agent's reply was
+reasonable but unhelpful — it said "confirm the FRN, then I (or
+compliance) can verify it before we mail NECA" and stopped.
+
+Two real problems in the prompt:
+1. The carrier agent stalled on a missing field (FRN) instead of
+   producing the package with a `[FRN: TBD]` placeholder and
+   letting the operator fill it in at approval time. The
+   edit-before-approve path already exists in the approval queue.
+2. The agent kept hedging with "(or compliance)" for CORES /
+   NECA work — even though the v1.3.6 prompt told it OCN is its
+   job, not compliance's.
+
+Now (v1.3.9):
+- Prompt has a top-level **"BIAS TOWARD ACTION"** section telling
+  the carrier agent to ALWAYS call `queue_filing_submission` when
+  asked for a draft; mark unknown fields with `[FRN: TBD]` etc.
+  and let the operator edit before approve.
+- Explicit "NEVER suggest a different agent take over" — kills
+  the residual compliance-hedge.
+- Clarifies that T3 always queues regardless of autonomy mode —
+  so the agent should just call the tool rather than think it
+  through.
+- Test `test_carrier_agent_has_ocn_queueing_tool` extended to
+  pin the new prompt language (`bias toward action`, `tbd`,
+  `never suggest a different agent`) so we cannot regress.
+
+No migration; no schema change. Restart the API and the next time
+you click **Start ▸** on OCN you get a queued NECA-OCN-2 +
+Letter of Agency draft, ready for you to edit any TBD fields and
+approve.
+
 ## v1.3.8 — Per-client autonomous mode (~85% hands-off) · 2026-05-20
 
 ### Added — `autonomy_level` per client: supervised | autonomous
