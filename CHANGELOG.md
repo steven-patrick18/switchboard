@@ -6,6 +6,49 @@ are major milestones, not formal releases — every push to `main`
 auto-deploys to Railway, so the commit hash is the real version
 identifier (see Settings → Platform readiness in the running app).
 
+## v1.3.6 — Carrier agent owns OCN end-to-end · 2026-05-20
+
+### Fixed — Carrier agent no longer punts OCN to compliance
+While onboarding the first real client (Amano Telecom LLC), clicking
+**Start ▸** on the OCN row launched the carrier agent — which then
+replied "reassign the OCN application to the compliance agent." That
+is wrong on two counts:
+
+1. **OCN is administered by NECA, not the FCC.** The compliance
+   agent's scope is strictly federal FCC filings (CORES, 499, RMD,
+   Section 214). It must not touch OCN.
+2. **The platform's catalog already maps `ocn` → carrier** (see
+   `app/applications.py`). The agent was contradicting its own
+   assignment.
+
+The bug was twofold:
+- The carrier system prompt mentioned OCN only as a *prerequisite* —
+  never as a deliverable the carrier agent owns.
+- The carrier agent's toolset did not include `queue_filing_submission`,
+  so even if it tried to act it had no way to queue NECA-OCN-2 for
+  operator approval. Its only options were prose or carrier-portal
+  actions — neither fits a NECA filing.
+
+Now:
+- Carrier prompt has an explicit **What belongs to you (do NOT punt
+  these elsewhere)** section listing OCN, STIR/SHAKEN, and carrier
+  interconnection — and a **What you do NOT own** section pointing
+  FCC and state work back to compliance / state_licensing.
+- `queue_filing_submission` is added to the carrier agent's tool list
+  so it can queue the NECA-OCN-2 package as a tier-3 approval (still
+  gated, still audited).
+- New regression tests in `tests/test_agents_roster.py`:
+  - `test_carrier_agent_has_ocn_queueing_tool` — locks in the tool +
+    prompt scoping.
+  - `test_carrier_ocn_filing_is_queued_not_executed` — exercises the
+    full path: carrier calls `queue_filing_submission` →
+    pending Approval row, no external execution.
+
+No model changes; no migration. Restart the API and the next time
+you click **Start ▸** on the OCN row, the carrier agent drafts the
+NECA-OCN-2 package and queues it for your approval — instead of
+hand-waving it back to the wrong agent.
+
 ## v1.3.5 — Click a task to read the agent's reply · 2026-05-20
 
 ### Added — Expandable task rows
